@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en" class="paper">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PariksaRakshak — sealed examinations</title>
+<meta name="description" content="Automated examination platform with Safe Exam Browser lockdown, server-side grading and live invigilation.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/landing.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./">
+      <img src="assets/logo-mark.svg" alt="">
+      <b>Pariksa<i>Rakshak</i></b>
+    </a>
+    <span class="tag" id="instituteTag">Examination cell</span>
+    <span class="spacer"></span>
+    <a class="btn ghost small" href="#signin">Sign in</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ══════════════ HERO ══════════════ -->
+  <section class="hero wrap">
+    <div class="hero-grid">
+      <div class="ruled">
+        <span class="eyebrow">Automated examination system</span>
+        <h1>The paper opens only once the <em>hall is sealed</em>.</h1>
+        <p class="lede">
+          PariksaRakshak locks every machine into Safe Exam Browser, keeps answer keys
+          and hidden test cases on the server where no browser can reach them, and shows
+          you the room while the exam is running.
+        </p>
+        <div class="hero-actions">
+          <a class="btn" href="#signin">Sign in to the console</a>
+          <a class="btn ghost" href="#layers">See what is locked</a>
+        </div>
+        <div class="hero-facts">
+          <div><strong>4</strong><span>question types</span></div>
+          <div><strong>7</strong><span>incident types</span></div>
+          <div><strong>1</strong><span>file locks a lab</span></div>
+          <div><strong>₹0</strong><span>per month</span></div>
+        </div>
+      </div>
+
+      <!-- ── signature: the hall plan ── -->
+      <div class="hallplan rise" aria-label="Live seating plan illustration">
+        <div class="hallplan-head">
+          <b>Hall plan</b>
+          <span class="tag blue" id="planCode">CSE423-U1</span>
+          <span id="planClock">sealing…</span>
+        </div>
+        <div class="seats" id="seats"></div>
+        <div class="hallplan-feed" id="planFeed"></div>
+        <div class="hallplan-legend">
+          <span><i style="background:var(--card-2);border:1px solid var(--rule)"></i>vacant</span>
+          <span><i style="background:var(--blue)"></i>sealed</span>
+          <span><i style="background:var(--seal)"></i>incident</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ LAYERS ══════════════ -->
+  <section class="section wrap" id="layers">
+    <div class="section-head ruled">
+      <span class="eyebrow">Enforcement</span>
+      <h2>Three layers, and each one holds on its own.</h2>
+      <p class="muted">
+        A rule enforced only in JavaScript is a suggestion. Every restriction below lives
+        at the lowest layer that can actually enforce it.
+      </p>
+    </div>
+
+    <div class="layers">
+      <article class="layer">
+        <span class="where">On the machine</span>
+        <h3>Safe Exam Browser</h3>
+        <p>The operating system refuses the shortcut, so there is nothing for a script to intercept.</p>
+        <ul>
+          <li>Screenshots and screen recorders capture black</li>
+          <li>Alt+Tab, Win+Tab, virtual desktops disabled</li>
+          <li>Second monitors blanked, virtual machines refused</li>
+          <li>Quitting needs the invigilator's password</li>
+        </ul>
+      </article>
+
+      <article class="layer">
+        <span class="where">In the database</span>
+        <h3>Row-level security</h3>
+        <p>Students hold a public key by design. Postgres decides what that key is allowed to see.</p>
+        <ul>
+          <li>Answer keys are not in any row a student can read</li>
+          <li>Hidden test cases never leave the server</li>
+          <li>Marks are written by the server, never posted by the page</li>
+          <li>Answers lock the moment an attempt is submitted</li>
+        </ul>
+      </article>
+
+      <article class="layer">
+        <span class="where">In the room</span>
+        <h3>Local face check</h3>
+        <p>The camera stream stays in the browser. Only the event travels, so there is no video to store or leak.</p>
+        <ul>
+          <li>No face, or more than one face, for four seconds</li>
+          <li>Window blur, tab hidden, full screen exited</li>
+          <li>Alerts reach your console in about a second</li>
+          <li>Nothing is recorded or uploaded</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════════ SEQUENCE ══════════════ -->
+  <section class="section wrap">
+    <div class="section-head ruled">
+      <span class="eyebrow">One exam, start to finish</span>
+      <h2>Four moves.</h2>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <span class="n">01</span>
+        <div>
+          <h3>Write the paper</h3>
+          <p>Type a topic or paste your lecture notes and choose the mix — MCQs, fill in the blanks,
+             long answers, coding problems. Questions come back structured, with starter code and
+             test cases already split into visible and hidden. Edit anything before you save it.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="n">02</span>
+        <div>
+          <h3>Seal the lab</h3>
+          <p>One configuration file, made once, works for every exam you will ever run. Students
+             double-click it and the machine has nowhere else to go. They type the exam code to begin.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="n">03</span>
+        <div>
+          <h3>Watch the room</h3>
+          <p>Answers save as they are typed, so a power cut costs nothing. Code runs against the
+             visible tests as often as a student likes; submitting runs the hidden ones too, on the
+             server. Incidents appear on your console as they happen.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="n">04</span>
+        <div>
+          <h3>Return the marks</h3>
+          <p>Objective questions and coding problems are graded the instant the paper is submitted.
+             Long answers wait for you. Export the sheet as CSV when you are done.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ SIGN IN ══════════════ -->
+  <section class="signin wrap" id="signin">
+    <div class="signin-grid">
+      <div class="ruled">
+        <span class="eyebrow">Access</span>
+        <h2>Sign in.</h2>
+        <p class="muted">
+          Faculty accounts open the console: writing papers, scheduling, live invigilation and results.
+          Student accounts open the exam page — and only inside Safe Exam Browser.
+        </p>
+        <p class="muted" style="font-size:.88rem">
+          Taking an exam? Open the <code>.seb</code> file your department gave you.
+          This page will not let you sit a paper in an ordinary browser.
+        </p>
+        <div class="stamp" style="margin-top:1rem">Invigilated</div>
+      </div>
+
+      <div class="signin-card">
+        <div class="role-switch" role="group" aria-label="Account action">
+          <button id="tabSignin" aria-pressed="true">Sign in</button>
+          <button id="tabRegister" aria-pressed="false">New student</button>
+        </div>
+
+        <label class="field"><span>Email</span>
+          <input id="email" type="email" autocomplete="email" placeholder="you@institute.ac.in">
+        </label>
+        <label class="field"><span>Password</span>
+          <input id="password" type="password" autocomplete="current-password" placeholder="••••••••">
+        </label>
+
+        <div id="registerFields" class="hidden">
+          <label class="field"><span>Full name</span>
+            <input id="fullName" type="text" placeholder="As printed on the roll list">
+          </label>
+          <label class="field"><span>Roll number</span>
+            <input id="rollNo" type="text" placeholder="e.g. 23BCS114">
+          </label>
+        </div>
+
+        <button class="btn block" id="submitBtn">Sign in</button>
+        <p id="authMsg" class="notice error hidden" style="margin-top:.9rem"></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot wrap">
+  <img src="assets/logo-mark.svg" alt="" width="24" height="24" style="border-radius:7px">
+  <span>PariksaRakshak — <span id="footInstitute">Examination cell</span></span>
+  <span class="spacer"></span>
+  <span class="meta">Vercel · Supabase · Safe Exam Browser</span>
+</footer>
+
+<script type="module" src="js/landing.js"></script>
+</body>
+</html>

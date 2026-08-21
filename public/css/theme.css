@@ -1,0 +1,270 @@
+/* =========================================================================
+   PariksaRakshak — design system
+   Direction: university examination stationery. Ruled paper, margin rules,
+   seat numbers, the invigilator's stamp. Two surfaces:
+     .paper (default)  → faculty + public pages. Bright, documentary, dense.
+     .hall             → the student exam page. Dark, quiet, zero decoration.
+   ========================================================================= */
+
+/* ---------- 1. TOKENS ---------- */
+:root {
+  /* paper surface */
+  --paper:      #EFEEE9;
+  --card:       #FFFFFF;
+  --card-2:     #F7F6F2;
+  --ink:        #12161C;
+  --ink-2:      #4A5159;
+  --ink-3:      #7C8288;
+  --rule:       #DAD6CA;
+  --rule-soft:  #E7E4DA;
+
+  /* brand */
+  --blue:       #184F95;
+  --blue-deep:  #0E2E58;
+  --blue-wash:  #E8EEF7;
+  --seal:       #B3352A;
+  --seal-wash:  #F7E9E7;
+  --pass:       #1D6B4F;
+  --pass-wash:  #E6F1EC;
+  --warn:       #A9691A;
+  --warn-wash:  #F8EEE0;
+
+  /* logo hooks (consumed by the SVG assets) */
+  --logo-plate: #12161C;
+  --logo-face:  #EFEEE9;
+  --logo-word:  #12161C;
+  --logo-accent:#184F95;
+  --logo-sub:   #7C8288;
+
+  /* type */
+  --display: 'Bricolage Grotesque', 'Public Sans', system-ui, sans-serif;
+  --body:    'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  /* rhythm */
+  --gap: 1.5rem;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(18,22,28,.06), 0 8px 24px -12px rgba(18,22,28,.18);
+  --maxw: 1140px;
+}
+
+/* the exam hall: same tokens, night values */
+.hall {
+  --paper:     #0E1218;
+  --card:      #151A22;
+  --card-2:    #1B212B;
+  --ink:       #E9E7E0;
+  --ink-2:     #A7AEB8;
+  --ink-3:     #6E7681;
+  --rule:      #262D38;
+  --rule-soft: #1E242D;
+  --blue:      #6AA5F2;
+  --blue-deep: #A8C8F7;
+  --blue-wash: #16243A;
+  --seal:      #E4695C;
+  --seal-wash: #2A1A18;
+  --pass:      #5FCB9B;
+  --pass-wash: #12271F;
+  --warn:      #E0A458;
+  --warn-wash: #2A2117;
+
+  --logo-plate: #EFEEE9;
+  --logo-face:  #0E1218;
+  --logo-word:  #E9E7E0;
+  --logo-accent:#6AA5F2;
+  --logo-sub:   #6E7681;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+}
+
+/* ---------- 2. BASE ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { font-family: var(--display); font-weight: 600; letter-spacing: -.02em; margin: 0 0 .4em; line-height: 1.1; }
+h1 { font-size: clamp(2.4rem, 5.4vw, 4rem); }
+h2 { font-size: clamp(1.6rem, 3vw, 2.25rem); }
+h3 { font-size: 1.15rem; letter-spacing: -.01em; }
+p  { margin: 0 0 1rem; }
+a  { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* the recurring utility voice of the product: mono, tracked, upper */
+.eyebrow, .seat-code, .stamp, .tag, .timer, .meta {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: .7rem;
+}
+
+.eyebrow { color: var(--ink-3); display: inline-flex; align-items: center; gap: .5rem; }
+.eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--rule); }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem; }
+.muted { color: var(--ink-2); }
+.hidden { display: none !important; }
+
+/* ---------- 3. THE MARGIN RULE ---------- */
+/* Answer booklets have a red margin line down the left. Every major section
+   carries one — it is the page's spine, not decoration. */
+.ruled {
+  border-left: 1px solid var(--rule);
+  padding-left: 1.5rem;
+  position: relative;
+}
+.ruled::before {
+  content: "";
+  position: absolute; left: -1px; top: 0; width: 3px; height: 44px;
+  background: var(--seal);
+}
+
+/* ---------- 4. BUTTONS ---------- */
+.btn {
+  font-family: var(--body);
+  font-size: .92rem;
+  font-weight: 600;
+  padding: .62rem 1.15rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--blue);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: .5rem;
+  transition: transform .12s ease, background .15s ease, box-shadow .15s ease;
+}
+.btn:hover { background: var(--blue-deep); transform: translateY(-1px); }
+.hall .btn:hover { color: #0E1218; }
+.btn:active { transform: translateY(0); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; transform: none; }
+
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+.btn.ghost:hover { background: var(--card-2); color: var(--ink); border-color: var(--ink-3); }
+.btn.danger { background: var(--seal); }
+.btn.danger:hover { background: #8E2A21; }
+.hall .btn.danger:hover { color: #fff; }
+.btn.pass { background: var(--pass); }
+.hall .btn.pass:hover { background: var(--pass); color: #0E1218; }
+.btn.small { padding: .38rem .75rem; font-size: .82rem; }
+.btn.block { width: 100%; justify-content: center; }
+
+/* ---------- 5. FORM CONTROLS ---------- */
+label.field { display: block; margin-bottom: .9rem; }
+label.field > span {
+  display: block;
+  font-family: var(--mono); font-size: .68rem; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--ink-3); margin-bottom: .35rem;
+}
+input, select, textarea {
+  width: 100%;
+  font-family: var(--body); font-size: .95rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: .55rem .75rem;
+}
+.hall input, .hall select, .hall textarea { background: var(--card-2); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-wash); }
+textarea { resize: vertical; }
+input.code-entry {
+  font-family: var(--mono); font-size: 1.4rem; letter-spacing: .22em;
+  text-transform: uppercase; text-align: center; padding: .8rem;
+}
+
+/* ---------- 6. CARDS & TAGS ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1.35rem;
+}
+.card.flat { box-shadow: none; }
+.card.raised { box-shadow: var(--shadow); }
+
+.tag {
+  display: inline-block;
+  padding: .18rem .5rem;
+  border-radius: 4px;
+  background: var(--card-2);
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+}
+.tag.blue  { background: var(--blue-wash); color: var(--blue-deep); border-color: transparent; }
+.tag.seal  { background: var(--seal-wash); color: var(--seal); border-color: transparent; }
+.tag.pass  { background: var(--pass-wash); color: var(--pass); border-color: transparent; }
+.tag.warn  { background: var(--warn-wash); color: var(--warn); border-color: transparent; }
+
+/* the invigilator's stamp — used once per page, at most */
+.stamp {
+  display: inline-block;
+  border: 2px solid var(--seal);
+  color: var(--seal);
+  padding: .35rem .7rem;
+  border-radius: 6px;
+  transform: rotate(-4deg);
+  font-weight: 700;
+  letter-spacing: .18em;
+}
+
+/* ---------- 7. HEADER ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  background: var(--paper);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-inner {
+  max-width: var(--maxw); margin: 0 auto; padding: .7rem 1.5rem;
+  display: flex; align-items: center; gap: 1rem;
+}
+.brand { display: flex; align-items: center; gap: .65rem; text-decoration: none; color: var(--ink); }
+.brand img { width: 34px; height: 34px; border-radius: 9px; display: block; }
+.brand b { font-family: var(--display); font-size: 1.05rem; letter-spacing: -.02em; }
+.brand b i { font-style: normal; color: var(--blue); }
+.spacer { flex: 1; }
+
+/* ---------- 8. ALERTS ---------- */
+.notice {
+  border-left: 3px solid var(--blue);
+  background: var(--blue-wash);
+  color: var(--blue-deep);
+  padding: .7rem .9rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: .9rem;
+}
+.notice.error { border-color: var(--seal); background: var(--seal-wash); color: var(--seal); }
+.notice.ok    { border-color: var(--pass); background: var(--pass-wash); color: var(--pass); }
+
+/* ---------- 9. MOTION ---------- */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(179,53,42,.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(179,53,42,0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

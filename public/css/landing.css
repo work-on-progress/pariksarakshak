@@ -1,0 +1,155 @@
+/* =========================================================================
+   Landing page — the hall plan is the signature element.
+   ========================================================================= */
+
+/* ---------- HERO ---------- */
+.hero { padding: 4.5rem 0 3rem; }
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 3.5rem;
+  align-items: center;
+}
+.hero h1 { margin-top: .8rem; }
+.hero h1 em {
+  font-style: normal;
+  color: var(--blue);
+  white-space: nowrap;
+  background: linear-gradient(transparent 64%, var(--blue-wash) 64%, var(--blue-wash) 92%, transparent 92%);
+}
+.hero .lede { font-size: 1.1rem; color: var(--ink-2); max-width: 46ch; }
+.hero-actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.6rem; }
+
+.hero-facts {
+  display: flex; gap: 2rem; flex-wrap: wrap;
+  margin-top: 2.4rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
+}
+.hero-facts div { min-width: 92px; }
+.hero-facts strong {
+  display: block; font-family: var(--display); font-size: 1.5rem; letter-spacing: -.02em;
+}
+.hero-facts span {
+  font-family: var(--mono); font-size: .66rem; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--ink-3);
+}
+
+/* ---------- SIGNATURE: HALL PLAN ---------- */
+.hallplan {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.1rem;
+}
+.hallplan-head {
+  display: flex; align-items: baseline; gap: .6rem;
+  padding-bottom: .8rem; margin-bottom: .9rem;
+  border-bottom: 1px dashed var(--rule);
+}
+.hallplan-head b { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; }
+.hallplan-head span { font-family: var(--mono); font-size: .66rem; color: var(--ink-3); margin-left: auto; }
+
+.seats {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+}
+.seat {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  background: var(--card-2);
+  border: 1px solid var(--rule-soft);
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: .54rem; letter-spacing: .04em;
+  color: var(--ink-3);
+  transition: background .35s ease, color .35s ease, border-color .35s ease;
+}
+.seat.sealed {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+.seat.flagged {
+  background: var(--seal);
+  border-color: var(--seal);
+  color: #fff;
+  animation: pulse 1.1s ease-in-out 3;
+}
+.seat.empty { opacity: .45; }
+
+.hallplan-feed {
+  margin-top: .9rem; padding-top: .8rem; border-top: 1px dashed var(--rule);
+  font-family: var(--mono); font-size: .7rem; color: var(--ink-2);
+  min-height: 2.6rem;
+}
+.hallplan-feed div { display: flex; gap: .6rem; align-items: center; }
+.hallplan-feed .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--seal); flex: none; }
+.hallplan-legend {
+  display: flex; gap: 1rem; flex-wrap: wrap; margin-top: .6rem;
+  font-family: var(--mono); font-size: .62rem; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--ink-3);
+}
+.hallplan-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: .35rem; }
+
+/* ---------- LAYERS SECTION ---------- */
+.section { padding: 3.5rem 0; border-top: 1px solid var(--rule); }
+.section-head { max-width: 60ch; margin-bottom: 2.2rem; }
+
+.layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+.layer {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1.4rem;
+}
+.layer .where {
+  font-family: var(--mono); font-size: .64rem; text-transform: uppercase;
+  letter-spacing: .14em; color: var(--seal); display: block; margin-bottom: .7rem;
+}
+.layer h3 { margin-bottom: .5rem; }
+.layer p { font-size: .92rem; color: var(--ink-2); margin: 0 0 .9rem; }
+.layer ul { margin: 0; padding-left: 1.1rem; font-size: .88rem; color: var(--ink-2); }
+.layer li { margin-bottom: .3rem; }
+
+/* ---------- SEQUENCE ---------- */
+.steps { display: grid; gap: 0; }
+.step {
+  display: grid; grid-template-columns: 3.5rem 1fr; gap: 1.25rem;
+  padding: 1.35rem 0;
+  border-top: 1px solid var(--rule-soft);
+}
+.step:first-child { border-top: none; }
+.step .n {
+  font-family: var(--mono); font-size: .78rem; color: var(--blue);
+  padding-top: .18rem; letter-spacing: .1em;
+}
+.step h3 { margin-bottom: .25rem; }
+.step p { margin: 0; color: var(--ink-2); font-size: .94rem; max-width: 68ch; }
+
+/* ---------- SIGN IN ---------- */
+.signin { padding: 3.5rem 0 4.5rem; border-top: 1px solid var(--rule); }
+.signin-grid { display: grid; grid-template-columns: 1fr 400px; gap: 3rem; align-items: start; }
+.signin-card { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 1.6rem; box-shadow: var(--shadow); }
+.role-switch { display: flex; gap: .4rem; margin-bottom: 1.1rem; }
+.role-switch button {
+  flex: 1; padding: .5rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--rule); background: var(--card-2); color: var(--ink-2);
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+  cursor: pointer;
+}
+.role-switch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* ---------- FOOTER ---------- */
+.foot {
+  border-top: 1px solid var(--rule); padding: 2rem 0 3rem;
+  font-size: .85rem; color: var(--ink-3);
+  display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+}
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 900px) {
+  .hero-grid, .signin-grid { grid-template-columns: 1fr; gap: 2.25rem; }
+  .layers { grid-template-columns: 1fr; }
+  .hero { padding-top: 2.75rem; }
+}

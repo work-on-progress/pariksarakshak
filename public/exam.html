@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examination — PariksaRakshak</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+</head>
+<body class="hall">
+
+<!-- ══════════ JOIN ══════════ -->
+<div class="gate" id="joinScreen">
+  <div class="gate-inner join-card">
+    <img src="assets/logo-mark.svg" alt="">
+    <h1 style="text-align:left">Enter your exam code</h1>
+    <p style="text-align:left">The code is on the board, or your invigilator will read it out.</p>
+    <label class="field"><span>Exam code</span>
+      <input id="examCode" class="code-entry" autocomplete="off" spellcheck="false" placeholder="CSE423-U1">
+    </label>
+    <button class="btn block" id="joinBtn">Start the paper</button>
+    <p id="joinMsg" class="notice error hidden" style="margin-top:.9rem"></p>
+    <p class="meta" style="margin-top:1.4rem;color:var(--ink-3)">
+      Signed in as <span id="whoami">…</span> · <a href="#" id="signOutLink">sign out</a>
+    </p>
+  </div>
+</div>
+
+<!-- ══════════ PAPER ══════════ -->
+<div id="examScreen" class="hidden">
+  <div class="hall-bar">
+    <img src="assets/logo-mark.svg" alt="" width="28" height="28" style="border-radius:8px">
+    <span class="paper-name" id="paperTitle"></span>
+    <span class="seat-code" id="paperCode"></span>
+    <span class="spacer"></span>
+    <video id="cam" class="cam" muted playsinline></video>
+    <span class="cam-state" id="camState">camera off</span>
+    <span class="timer" id="timer">--:--</span>
+    <button class="btn danger" id="finishBtn">Finish &amp; submit</button>
+  </div>
+
+  <div class="paper-sheet" id="questionArea"></div>
+</div>
+
+<script type="module" src="js/exam.js"></script>
+</body>
+</html>
