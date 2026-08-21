@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup check — PariksaRakshak</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./"><img src="assets/logo-mark.svg" alt=""><b>Pariksa<i>Rakshak</i></b></a>
+    <span class="tag">Setup check</span>
+    <span class="spacer"></span>
+    <a class="btn ghost small" href="index.html">Back to sign in</a>
+  </div>
+</header>
+
+<main class="console" style="max-width:900px">
+  <div class="ruled" style="margin-bottom:1.75rem">
+    <span class="eyebrow">Before the first exam</span>
+    <h1 style="font-size:2.1rem">Is everything wired up?</h1>
+    <p class="muted">This page tests the real system — the keys, the database, the rules that
+      hide answers, both functions, the camera and Safe Exam Browser. Anything red tells you
+      exactly what to fix and where.</p>
+  </div>
+
+  <div class="actions" style="margin-bottom:1.25rem">
+    <button class="btn" id="runBtn">Run the checks</button>
+    <span class="meta" id="summary" style="color:var(--ink-3)"></span>
+  </div>
+
+  <div class="checks" id="checks"></div>
+
+  <div class="panel" style="margin-top:1.75rem">
+    <div class="panel-head"><h2>Sign in to test deeper</h2></div>
+    <div class="panel-body">
+      <p class="muted" style="font-size:.9rem">Some checks need an account. Sign in as your
+        faculty account here, then run the checks again.</p>
+      <div class="row">
+        <label class="field"><span>Email</span><input id="email" type="email"></label>
+        <label class="field"><span>Password</span><input id="password" type="password"></label>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="signInBtn">Sign in</button>
+        <span class="meta" id="who" style="color:var(--ink-3)"></span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script type="module" src="js/setup.js"></script>
+</body>
+</html>

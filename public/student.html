@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Student portal — PariksaRakshak</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./"><img src="assets/logo-mark.svg" alt=""><b>Pariksa<i>Rakshak</i></b></a>
+    <span class="tag" id="instituteTag">Student portal</span>
+    <span class="spacer"></span>
+    <span class="meta" id="whoami">…</span>
+    <button class="btn ghost small" id="signOutBtn">Sign out</button>
+  </div>
+</header>
+
+<main class="console student-console">
+
+  <section class="student-hero ruled">
+    <span class="eyebrow">Secure examination entry</span>
+    <h1>Choose your paper here. The exam opens in Safe Exam Browser.</h1>
+    <p class="muted">This page works in Chrome, Edge or Safari. When you press
+      <b>Start secure exam</b>, your browser asks permission to open Safe Exam
+      Browser — choose <b>Open</b>. The paper itself never opens in this browser.</p>
+  </section>
+
+  <section class="panel" style="margin-top:1.5rem">
+    <div class="panel-head"><h2>Your papers</h2><span class="eyebrow" id="liveCount">looking…</span></div>
+    <div class="panel-body">
+      <div id="examList" class="student-exam-list">
+        <p class="empty">Checking for papers that are open…</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:1.25rem">
+    <div class="panel-head"><h2>Or type the code from the board</h2></div>
+    <div class="panel-body">
+      <div class="student-code-row">
+        <label class="field"><span>Exam code</span>
+          <input id="examCode" class="code-entry" autocomplete="off" spellcheck="false" placeholder="CSE423-U1">
+        </label>
+        <button class="btn" id="startByCodeBtn">Start secure exam</button>
+      </div>
+      <p id="portalMsg" class="notice error hidden" style="margin-top:.9rem"></p>
+    </div>
+  </section>
+
+  <section class="panel seb-help" style="margin-top:1.25rem">
+    <div class="panel-body">
+      <b>What happens when you press start</b>
+      <ol class="launch-steps">
+        <li>Your browser asks <b>Open Safe Exam Browser?</b> — choose Open.</li>
+        <li>Safe Exam Browser starts and locks the machine.</li>
+        <li>You are signed in automatically. No password to type again.</li>
+        <li>The paper you chose opens. Read the rules, then begin.</li>
+      </ol>
+      <p class="muted" style="font-size:.88rem;margin:.6rem 0 0">
+        Safe Exam Browser must already be installed on this machine. If nothing
+        happens when you press start, tell the invigilator.</p>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="js/student.js"></script>
+</body>
+</html>

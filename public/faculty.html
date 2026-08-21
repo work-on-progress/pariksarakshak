@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console — PariksaRakshak</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./"><img src="assets/logo-mark.svg" alt=""><b>Pariksa<i>Rakshak</i></b></a>
+    <span class="tag" id="instituteTag">Console</span>
+    <span class="spacer"></span>
+    <span class="meta" id="whoami"></span>
+    <a class="btn ghost small" href="setup.html">Setup check</a>
+    <button class="btn ghost small" id="signOutBtn">Sign out</button>
+  </div>
+</header>
+
+<main class="console">
+  <div class="tabs" role="tablist">
+    <button id="tab-papers"    aria-selected="true">Papers</button>
+    <button id="tab-questions" aria-selected="false">Questions</button>
+    <button id="tab-students"  aria-selected="false">Students</button>
+    <button id="tab-room"      aria-selected="false">The room</button>
+    <button id="tab-results"   aria-selected="false">Results</button>
+  </div>
+
+  <!-- ══════════════ PAPERS ══════════════ -->
+  <section class="pane active" id="pane-papers">
+    <div class="split">
+      <div class="panel">
+        <div class="panel-head"><h2>New paper</h2></div>
+        <div class="panel-body">
+          <div class="row">
+            <label class="field"><span>Title</span>
+              <input id="title" placeholder="Virtualization Technology — Unit 1"></label>
+            <label class="field"><span>Exam code</span>
+              <input id="code" placeholder="CSE423-U1" style="text-transform:uppercase"></label>
+          </div>
+          <div class="row-3">
+            <label class="field"><span>Opens</span><input id="starts" type="datetime-local"></label>
+            <label class="field"><span>Closes</span><input id="ends" type="datetime-local"></label>
+            <label class="field"><span>Minutes allowed</span><input id="dur" type="number" value="60" min="5"></label>
+          </div>
+          <label class="field"><span>Instructions shown before the paper opens</span>
+            <textarea id="instructions" rows="2" placeholder="Anything specific to this paper — calculator allowed, rough sheets, and so on."></textarea></label>
+          <label class="check"><input type="checkbox" id="shuffleQ" checked>
+            <span>Give every student a different question order</span></label>
+          <label class="check"><input type="checkbox" id="shuffleO" checked>
+            <span>Shuffle the multiple-choice options too</span></label>
+          <div class="actions">
+            <button class="btn" id="createExam">Create paper</button>
+            <span class="meta" style="color:var(--ink-3)">Times are your local time</span>
+          </div>
+          <p id="examMsg" class="notice hidden" style="margin-top:.8rem"></p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Your papers</h2><span class="eyebrow" id="examCount"></span></div>
+        <div class="panel-body"><div id="examList"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ QUESTIONS ══════════════ -->
+  <section class="pane" id="pane-questions">
+    <label class="field" style="max-width:520px"><span>Working on paper</span>
+      <select id="examSelect"></select></label>
+
+    <div class="split">
+      <div class="stack">
+        <div class="panel">
+          <div class="panel-head"><h2>Draft with AI</h2><span class="eyebrow">You approve every question</span></div>
+          <div class="panel-body">
+            <label class="field"><span>Topic</span>
+              <input id="topic" placeholder="SQL indexing and query optimisation"></label>
+            <label class="field"><span>Lecture notes (optional — questions stay inside this text)</span>
+              <textarea id="sourceText" rows="4" placeholder="Paste the unit notes here."></textarea></label>
+            <div class="row-4">
+              <label class="field"><span>MCQ</span><input id="nMcq" type="number" value="5" min="0" max="20"></label>
+              <label class="field"><span>Blanks</span><input id="nCloze" type="number" value="2" min="0" max="10"></label>
+              <label class="field"><span>Long</span><input id="nLong" type="number" value="1" min="0" max="5"></label>
+              <label class="field"><span>Coding</span><input id="nCode" type="number" value="2" min="0" max="5"></label>
+            </div>
+            <div class="row">
+              <label class="field"><span>Difficulty</span>
+                <select id="difficulty">
+                  <option value="easy">Easy</option>
+                  <option value="moderate" selected>Moderate</option>
+                  <option value="hard">Hard</option>
+                </select></label>
+              <label class="field"><span>Coding language</span>
+                <select id="codeLang">
+                  <option value="python" selected>Python</option>
+                  <option value="c">C</option>
+                  <option value="cpp">C++</option>
+                  <option value="java">Java</option>
+                  <option value="javascript">JavaScript</option>
+                </select></label>
+            </div>
+            <div class="actions">
+              <button class="btn" id="genBtn">Draft questions</button>
+              <button class="btn pass hidden" id="saveBtn">Save to paper</button>
+              <button class="btn ghost hidden" id="clearBtn">Discard draft</button>
+            </div>
+            <p id="genMsg" class="notice hidden" style="margin-top:.8rem"></p>
+            <div id="preview" style="margin-top:1.1rem"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2 id="manualHead">Write one by hand</h2></div>
+          <div class="panel-body">
+            <div class="row-3">
+              <label class="field"><span>Type</span>
+                <select id="mType">
+                  <option value="mcq">Multiple choice</option>
+                  <option value="cloze">Fill the blanks</option>
+                  <option value="long">Long answer</option>
+                  <option value="coding">Coding</option>
+                </select></label>
+              <label class="field"><span>Marks</span><input id="mMarks" type="number" value="1" min="0" step="0.5"></label>
+              <label class="field"><span>Language (coding)</span>
+                <select id="mLang">
+                  <option value="python">Python</option><option value="c">C</option>
+                  <option value="cpp">C++</option><option value="java">Java</option>
+                  <option value="javascript">JavaScript</option>
+                </select></label>
+            </div>
+            <label class="field"><span>Question</span>
+              <textarea id="mPrompt" rows="3" placeholder="For fill-in-the-blanks use ____ for each blank."></textarea></label>
+
+            <div id="mMcqBox">
+              <div class="row">
+                <label class="field"><span>Option A</span><input id="mOptA"></label>
+                <label class="field"><span>Option B</span><input id="mOptB"></label>
+              </div>
+              <div class="row">
+                <label class="field"><span>Option C</span><input id="mOptC"></label>
+                <label class="field"><span>Option D</span><input id="mOptD"></label>
+              </div>
+              <label class="field" style="max-width:180px"><span>Correct option</span>
+                <select id="mKey"><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
+            </div>
+
+            <div id="mClozeBox" class="hidden">
+              <label class="field"><span>Answers, in order, separated by |</span>
+                <input id="mCloze" class="mono-input" placeholder="WHERE | HAVING"></label>
+            </div>
+
+            <div id="mCodingBox" class="hidden">
+              <label class="field"><span>Starter code</span>
+                <textarea id="mStarter" rows="4" class="mono-input"></textarea></label>
+              <p class="meta" style="color:var(--ink-3)">Test cases — tick "hidden" for the ones students must not see</p>
+              <div id="mTests"></div>
+              <button class="btn ghost small" id="addTest">Add a test case</button>
+            </div>
+
+            <div class="actions" style="margin-top:1rem">
+              <button class="btn" id="mSave">Add to paper</button>
+              <button class="btn ghost hidden" id="mCancel">Cancel edit</button>
+            </div>
+            <p id="mMsg" class="notice hidden" style="margin-top:.8rem"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>In this paper</h2><span class="eyebrow" id="qCount"></span></div>
+        <div class="panel-body"><div id="questionList"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ STUDENTS ══════════════ -->
+  <section class="pane" id="pane-students">
+    <div class="split">
+      <div class="panel">
+        <div class="panel-head"><h2>Create accounts in bulk</h2></div>
+        <div class="panel-body">
+          <p class="muted" style="font-size:.9rem">One student per line: roll number, then a
+            comma, then the name. Passwords are generated and shown once — download the CSV
+            and hand out the slips.</p>
+          <label class="field"><span>Roll list</span>
+            <textarea id="rollList" rows="8" class="mono-input" placeholder="23BCS114, Aarti Sharma&#10;23BCS115, Rohit Verma&#10;23BCS116, Simran Kaur"></textarea></label>
+          <div class="actions">
+            <button class="btn" id="createStudents">Create accounts</button>
+            <button class="btn ghost hidden" id="downloadCreds">Download the slips (CSV)</button>
+          </div>
+          <p id="studentMsg" class="notice hidden" style="margin-top:.8rem"></p>
+          <div id="creds" class="credentials hidden" style="margin-top:.8rem"></div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="panel">
+          <div class="panel-head"><h2>Reset a password</h2></div>
+          <div class="panel-body">
+            <div class="actions">
+              <input id="resetRoll" placeholder="Roll number" style="max-width:220px">
+              <button class="btn ghost" id="resetPw">Reset</button>
+            </div>
+            <p id="resetMsg" class="notice hidden" style="margin-top:.8rem"></p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Enrolled students</h2><span class="eyebrow" id="studentCount"></span></div>
+          <div class="panel-body"><div id="studentList" class="roster"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE ROOM ══════════════ -->
+  <section class="pane" id="pane-room">
+    <label class="field" style="max-width:520px"><span>Watching paper</span>
+      <select id="roomExam"></select></label>
+
+    <div class="stats" id="roomStats"></div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel-head"><h2>Who is in the room</h2>
+          <button class="btn ghost tiny" id="refreshRoom" style="margin-left:auto">Refresh</button></div>
+        <div class="panel-body"><div id="roster" class="roster"></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Incidents, as they happen</h2><span class="eyebrow" id="liveState">connecting…</span></div>
+        <div class="panel-body"><div id="feed" class="feed"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ RESULTS ══════════════ -->
+  <section class="pane" id="pane-results">
+    <label class="field" style="max-width:520px"><span>Paper</span>
+      <select id="resultExam"></select></label>
+
+    <div class="stack">
+      <div class="panel">
+        <div class="panel-head"><h2>Marks</h2>
+          <button class="btn ghost small" id="exportBtn" style="margin-left:auto">Export CSV</button></div>
+        <div class="panel-body"><div id="resultsTable"></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Long answers to mark</h2><span class="eyebrow" id="longCount"></span></div>
+        <div class="panel-body"><div id="longAnswers"></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="js/faculty.js"></script>
+</body>
+</html>
