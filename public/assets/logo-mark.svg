@@ -1,18 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="PariksaRakshak">
   <title>PariksaRakshak</title>
-  <!-- plate -->
   <rect x="0" y="0" width="200" height="200" rx="44" fill="var(--logo-plate, #12161C)"/>
-  <!-- antenna -->
   <line x1="100" y1="35" x2="100" y2="24" stroke="var(--logo-face, #F3F1EC)" stroke-width="4" stroke-linecap="round"/>
   <circle cx="100" cy="18" r="6" fill="var(--logo-face, #F3F1EC)"/>
-  <!-- face -->
   <circle cx="100" cy="110" r="75" fill="var(--logo-face, #F3F1EC)"/>
-  <!-- mouth -->
   <path d="M70,155 Q100,170 130,155" fill="none" stroke="var(--logo-plate, #12161C)" stroke-width="6" stroke-linecap="round"/>
-  <!-- nose bridge -->
   <rect x="96" y="86" width="8" height="14" rx="2" fill="var(--logo-plate, #12161C)"/>
   <rect x="92" y="98" width="16" height="24" fill="var(--logo-plate, #12161C)"/>
-  <!-- binocular barrels -->
   <circle cx="72" cy="110" r="26" fill="var(--logo-plate, #12161C)"/>
   <circle cx="128" cy="110" r="26" fill="var(--logo-plate, #12161C)"/>
 </svg>
