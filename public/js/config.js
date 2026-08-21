@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 // Supabase → Project Settings → API
-export const SUPABASE_URL = "https://kjogruyffpafslowruzz.supabase.co/rest/v1/";
+export const SUPABASE_URL = "https://kjogruyffpafslowruzz.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_x_7w42XZ09y6el8gdv4ojA_KTUxxTHg";
 
 // The anon key above is meant to be public — row-level security decides what it
