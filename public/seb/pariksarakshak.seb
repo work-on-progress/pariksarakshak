@@ -227,7 +227,7 @@
     <key>enableZoomText</key>
     <true />
     <key>examKeySalt</key>
-    <data></data>
+    <data>xz/IemgYZPoK+hnTQ4aYkRo1U31Zgik67xWxRZkzV2E=</data>
     <key>examSessionClearCookiesOnEnd</key>
     <true />
     <key>examSessionClearCookiesOnStart</key>
@@ -1867,7 +1867,7 @@
     <key>startResource</key>
     <string />
     <key>startURL</key>
-    <string>https://safeexambrowser.org/start</string>
+    <string>https://pariksarakshak.vercel.app/exam</string>
     <key>startURLAppendQueryParameter</key>
     <false />
     <key>systemAlwaysOn</key>
