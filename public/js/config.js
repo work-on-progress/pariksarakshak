@@ -4,8 +4,8 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 // Supabase → Project Settings → API
-export const SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co";
-export const SUPABASE_ANON_KEY = "YOUR_ANON_PUBLIC_KEY";
+export const SUPABASE_URL = "https://kjogruyffpafslowruzz.supabase.co/rest/v1/";
+export const SUPABASE_ANON_KEY = "sb_publishable_x_7w42XZ09y6el8gdv4ojA_KTUxxTHg";
 
 // The anon key above is meant to be public — row-level security decides what it
 // can read. The SERVICE KEY (the other, longer one on the same settings page)
@@ -13,7 +13,7 @@ export const SUPABASE_ANON_KEY = "YOUR_ANON_PUBLIC_KEY";
 // Supabase Edge Function secrets.
 
 // ---- Shown to people ----------------------------------------------------
-export const INSTITUTE_NAME = "Shri Khushal Das University";
+export const INSTITUTE_NAME = "";
 export const SUPPORT_NOTE = "Ask your invigilator if anything on this page does not work.";
 
 // ---- Student accounts ---------------------------------------------------
