@@ -34,7 +34,7 @@ export const SEB_CONFIG_FILE = "pariksarakshak.seb";
 export const STRICT_SEB_VERIFY = true;
 
 // ---- Exam behaviour -----------------------------------------------------
-export const ALLOW_DEV_BYPASS = true;   // set FALSE before the first real exam
+export const ALLOW_DEV_BYPASS = false;   // set FALSE before the first real exam
 export const PROCTOR_ENABLED = true;    // false = no camera at all
 export const LOCK_ON_FACE_LOSS = true;  // cover the paper when the face is gone
 export const FACE_LOCK_MS = 5000;       // how long before the paper is covered
