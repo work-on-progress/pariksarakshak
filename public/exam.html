@@ -19,21 +19,20 @@
 </head>
 <body class="hall">
 
-<!-- ══════ 1. ENTER THE CODE ══════ -->
-<div class="gate" id="joinScreen">
+<!-- ══════ 1. THE SIX-DIGIT CODE ══════ -->
+<div class="gate" id="codeScreen">
   <div class="gate-inner join-card">
     <img src="assets/logo-mark.svg" alt="">
     <h1 style="text-align:left">Enter your exam code</h1>
-    <p style="text-align:left">Normally the portal fills this in for you. Type it only if
-      your invigilator asks you to.</p>
-    <label class="field"><span>Exam code</span>
-      <input id="examCode" class="code-entry" autocomplete="off" spellcheck="false" placeholder="CSE423-U1">
+    <p style="text-align:left">The six digits shown on the portal, on the machine you
+      signed in with. The code lasts five minutes and works once.</p>
+    <label class="field"><span>Six-digit code</span>
+      <input id="entryCode" class="code-entry" inputmode="numeric" autocomplete="off"
+             spellcheck="false" maxlength="6" placeholder="000000">
     </label>
-    <button class="btn block" id="joinBtn">Continue</button>
-    <p id="joinMsg" class="notice error hidden" style="margin-top:.9rem"></p>
-    <p class="meta" style="margin-top:1.4rem;color:var(--ink-3)">
-      Signed in as <span id="whoami">…</span> · <a href="#" id="signOutLink">sign out</a>
-    </p>
+    <button class="btn block" id="enterBtn">Open my paper</button>
+    <p id="codeMsg" class="notice error hidden" style="margin-top:.9rem"></p>
+    <p class="meta" style="margin-top:1.4rem;color:var(--ink-3)" id="codeHint"></p>
   </div>
 </div>
 
@@ -61,7 +60,9 @@
     <img src="assets/logo-mark.svg" alt="" width="28" height="28" style="border-radius:8px">
     <span class="paper-name" id="paperTitle"></span>
     <span class="seat-code" id="paperCode"></span>
+    <span class="tag" id="modeTag"></span>
     <span class="spacer"></span>
+    <span class="attention hidden" id="attention"></span>
     <video id="cam" class="cam" muted playsinline></video>
     <span class="cam-state" id="camState">camera off</span>
     <span class="timer" id="timer">--:--</span>
@@ -69,6 +70,7 @@
   </div>
   <div class="paper-sheet">
     <div class="progress-strip" id="progress"></div>
+    <div id="saveBanner" class="notice error hidden" style="margin-bottom:1rem"></div>
     <div id="questionArea"></div>
   </div>
 </div>
