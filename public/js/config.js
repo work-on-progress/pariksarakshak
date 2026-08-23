@@ -50,3 +50,24 @@ export const AUTOSAVE_DELAY_MS = 600;
 export const FACE_GRACE_MS = 30000;
 
 export const HEARTBEAT_MS = 30000;
+
+// ---- Browser-delivered papers -------------------------------------------
+export const BROWSER_MODE = {
+  requireFullscreen: true,
+  blockOnFullscreenExit: true,
+  blockCopyPaste: true,
+  blockPrint: true,
+  warnOnTabSwitch: true,
+  singleSession: true,
+  autoSubmitAfterSwitches: 0,
+};
+
+// ---- Document import ----------------------------------------------------
+export const PDFJS_URL =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+
+export const PDFJS_WORKER =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+export const MAMMOTH_URL =
+  "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
