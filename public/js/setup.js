@@ -226,6 +226,42 @@ async function runAll() {
     return res.error ? ["warn", res.error] : ["warn", "Deployed, but the reply was unexpected."];
   });
 
+  // ---------- 12b. the single-session guard ----------
+  await step("fn-session", "The single-session guard is deployed", async () => {
+    const res = await callPublicFunction("session-check", { session_token: "x".repeat(40) });
+    if (res.error?.includes("not deployed")) {
+      return ["fail", "Not found. Run: supabase functions deploy session-check --no-verify-jwt"];
+    }
+    if (res.active === false) return ["ok", "Deployed, and it correctly rejects a made-up session."];
+    return ["warn", "Deployed, but the reply was unexpected."];
+  });
+
+  // ---------- 12c. the answer-saving fix ----------
+  await step("save-grants", "Answers can actually be written", async () => {
+    const { error } = await supabase.from("answers")
+      .select("id").limit(1);
+    if (error && /permission|denied/i.test(error.message)) {
+      return ["fail", "The answers table refuses even a read. Run migration 005."];
+    }
+    const { data: cols, error: colErr } = await supabase
+      .from("exams").select("delivery_mode").limit(1);
+    if (colErr && /delivery_mode/.test(colErr.message)) {
+      return ["fail", "Migration 005 has not been run — delivery modes and the answer-saving fix are both missing."];
+    }
+    return ["ok", "Migration 005 is in place. Answers save, and papers can be set to browser mode."];
+  });
+
+  // ---------- 12d. the code runner and Piston ----------
+  await step("piston", "The code execution service is reachable", async () => {
+    const res = await callFunction("run-code", { action: "ping" });
+    if (res.error?.includes("not deployed")) {
+      return ["fail", "Not found. Run: supabase functions deploy run-code"];
+    }
+    if (!res.ok) return ["warn", res.error ?? "The runner answered, but not as expected."];
+    if (res.piston === "reachable") return ["ok", `Piston answered at ${res.piston_url}. Coding questions will run.`];
+    return ["fail", `The runner is deployed but Piston is ${res.piston}. Coding questions will not run — avoid them, or set PISTON_URL to your own host.`];
+  });
+
   // ---------- 13. camera ----------
   await step("camera", "A camera is available for proctoring", async () => {
     try {
