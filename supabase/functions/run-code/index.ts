@@ -1,34 +1,51 @@
 // supabase/functions/run-code/index.ts
 //
-// PariksaRakshak — reliable Python runner + proper diagnostics
+// PariksaRakshak — Judge0-backed code runner
+//
+// Why this file exists:
+// The previous Wandbox sandbox returned:
+//   ERROR (catatonit:2): failed to exec pid1: No such file or directory
+// That is an execution-provider/container failure, not a student's Python error.
 //
 // Behaviour:
-//   Run visible tests:
-//     - executes ONLY visible examples
-//     - returns Input / Expected / Your Output
-//     - returns the real Python compiler/runtime error when code fails
+//   Run visible tests
+//     -> only visible examples
+//     -> returns Input / Expected / Your Output / real error
 //
-//   Submit for marks:
-//     - executes visible + hidden tests
-//     - hidden inputs/expected outputs NEVER leave this function
+//   Submit for marks
+//     -> visible + hidden tests
+//     -> hidden input/expected output never leave this function
 //
-// Python execution uses Wandbox. The function discovers a current stable
-// CPython 3 compiler from Wandbox's /api/list.json instead of permanently
-// hard-coding a single "head" compiler.
+// Judge0 CE is used asynchronously:
+//   POST /submissions -> token
+//   GET  /submissions/{token} until finished
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const WANDBOX_BASE =
-  Deno.env.get("WANDBOX_BASE") ?? "https://wandbox.org/api";
+const JUDGE0_BASE =
+  Deno.env.get("JUDGE0_BASE") ?? "https://ce.judge0.com";
 
-const PISTON_URL =
-  Deno.env.get("PISTON_URL") ?? "https://emkc.org/api/v2/piston/execute";
-
-const PISTON_TOKEN =
-  Deno.env.get("PISTON_TOKEN") ?? "";
+const JUDGE0_AUTH_TOKEN =
+  Deno.env.get("JUDGE0_AUTH_TOKEN") ?? "";
 
 const GAP_MS =
-  Number(Deno.env.get("CODE_RUNNER_GAP_MS") ?? 220);
+  Number(Deno.env.get("CODE_RUNNER_GAP_MS") ?? 180);
+
+const POLL_MS =
+  Number(Deno.env.get("JUDGE0_POLL_MS") ?? 350);
+
+const MAX_POLLS =
+  Number(Deno.env.get("JUDGE0_MAX_POLLS") ?? 24);
+
+// Stable Judge0 CE language IDs.
+// Python is the important one for tomorrow's exam.
+const LANGUAGE_ID: Record<string, number> = {
+  python: 92,      // Python 3.11.2
+  c: 103,          // C GCC 14.1
+  cpp: 105,        // C++ GCC 14.1
+  java: 91,        // Java 17
+  javascript: 93,  // Node.js 18.15
+};
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,11 +62,8 @@ type RunOutcome = {
   serviceError: boolean;
   exitCode: number;
   runner: string;
+  statusDescription: string;
 };
-
-let pythonCompilerCache:
-  | { name: string; expires: number }
-  | null = null;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,17 +74,20 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
 
     // ------------------------------------------------------------
-    // Setup check / liveness
+    // Setup check / provider health
     // ------------------------------------------------------------
     if (body.action === "ping") {
-      const compiler = await resolvePythonCompiler().catch(() => null);
+      const health = await judge0Health();
 
-      return json({
-        ok: Boolean(compiler),
-        python_runner: "wandbox",
-        python_compiler: compiler ?? null,
-        piston_configured: Boolean(PISTON_TOKEN),
-      }, compiler ? 200 : 503);
+      return json(
+        {
+          ok: health.ok,
+          provider: "judge0",
+          base: JUDGE0_BASE,
+          detail: health.detail,
+        },
+        health.ok ? 200 : 503,
+      );
     }
 
     // ------------------------------------------------------------
@@ -133,7 +150,7 @@ Deno.serve(async (req) => {
     );
 
     // ------------------------------------------------------------
-    // Validate attempt + timing
+    // Validate attempt and timing
     // ------------------------------------------------------------
     const { data: attempt } = await admin
       .from("attempts")
@@ -164,10 +181,7 @@ Deno.serve(async (req) => {
 
     const personalEnd =
       new Date(attempt.started_at).getTime() +
-      (
-        ex.duration_min +
-        (attempt.extra_minutes ?? 0)
-      ) * 60_000;
+      (ex.duration_min + (attempt.extra_minutes ?? 0)) * 60_000;
 
     const hardEnd = Math.min(
       new Date(ex.ends_at).getTime(),
@@ -204,12 +218,23 @@ Deno.serve(async (req) => {
       );
     }
 
-    const language = String(q.language ?? "python").toLowerCase();
+    const language =
+      String(q.language ?? "python").toLowerCase();
+
+    const languageId =
+      LANGUAGE_ID[language];
+
+    if (!languageId) {
+      return json(
+        { error: `Language not supported: ${language}` },
+        400,
+      );
+    }
 
     // ------------------------------------------------------------
-    // Read tests.
+    // Read tests:
     // run    -> visible only
-    // submit -> full set
+    // submit -> visible + hidden
     // ------------------------------------------------------------
     let query = admin
       .from("test_cases")
@@ -250,7 +275,7 @@ Deno.serve(async (req) => {
     }
 
     // ------------------------------------------------------------
-    // Execute
+    // Execute tests
     // ------------------------------------------------------------
     const results: Array<Record<string, unknown>> = [];
 
@@ -260,12 +285,11 @@ Deno.serve(async (req) => {
     let serviceFailures = 0;
 
     for (const test of tests) {
-      const outcome =
-        await runProgram(
-          language,
-          code,
-          String(test.stdin ?? ""),
-        );
+      const outcome = await runJudge0(
+        languageId,
+        code,
+        String(test.stdin ?? ""),
+      );
 
       if (outcome.serviceError) {
         serviceFailures++;
@@ -303,19 +327,19 @@ Deno.serve(async (req) => {
           stderr: outcome.stderr,
           exit_code: outcome.exitCode,
           runner: outcome.runner,
+          status: outcome.statusDescription,
         });
       }
 
       await sleep(GAP_MS);
     }
 
-    // If every provider call failed, this is infrastructure failure,
-    // not a wrong answer.
+    // Infrastructure failure is not a student's wrong answer.
     if (serviceFailures === tests.length) {
       return json(
         {
           error:
-            "The code execution service could not be reached. Your code was not judged and your marks were not changed.",
+            "The code execution provider is temporarily unavailable. Your code was not judged and your marks were not changed.",
           service_down: true,
         },
         503,
@@ -323,7 +347,7 @@ Deno.serve(async (req) => {
     }
 
     // ------------------------------------------------------------
-    // Full submission writes marks.
+    // Only full submission writes marks
     // ------------------------------------------------------------
     if (mode === "submit") {
       const allPassed =
@@ -339,15 +363,12 @@ Deno.serve(async (req) => {
             passed_tests: passed,
             total_tests: tests.length,
             auto_marks:
-              allPassed
-                ? Number(q.marks)
-                : 0,
+              allPassed ? Number(q.marks) : 0,
             updated_at:
               new Date().toISOString(),
           },
           {
-            onConflict:
-              "attempt_id,question_id",
+            onConflict: "attempt_id,question_id",
           },
         );
 
@@ -366,8 +387,7 @@ Deno.serve(async (req) => {
       mode,
       passed,
       total: tests.length,
-      all_passed:
-        passed === tests.length,
+      all_passed: passed === tests.length,
       results,
     });
   } catch (e) {
@@ -384,449 +404,239 @@ Deno.serve(async (req) => {
 });
 
 // ============================================================
-// Provider selection
+// Judge0
 // ============================================================
 
-async function runProgram(
-  language: string,
-  code: string,
-  stdin: string,
-): Promise<RunOutcome> {
-  if (language === "python") {
-    return await runWandboxPython(code, stdin);
-  }
-
-  if (PISTON_TOKEN) {
-    return await runPiston(language, code, stdin);
-  }
-
-  return {
-    stdout: "",
-    stderr:
-      "No execution provider is configured for this language. Python is available; other languages currently require the configured Piston service.",
-    serviceError: true,
-    exitCode: -1,
-    runner: "none",
-  };
-}
-
-// ============================================================
-// Wandbox Python
-// ============================================================
-
-async function resolvePythonCompiler(): Promise<string> {
-  // Wandbox's own Python examples use cpython-head. Avoid a fragile
-  // compiler-list filter here: the previous filter expected the version
-  // string itself to contain "python-3.", which caused valid CPython
-  // entries to be rejected and every run to look like a service outage.
-  return "cpython-head";
-}
-
-async function runWandboxPython(
-  code: string,
-  stdin: string,
-): Promise<RunOutcome> {
-  let compiler: string;
-
-  try {
-    compiler =
-      await resolvePythonCompiler();
-  } catch (e) {
-    return {
-      stdout: "",
-      stderr: String(e),
-      serviceError: true,
-      exitCode: -1,
-      runner: "wandbox",
-    };
-  }
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(
-        `${WANDBOX_BASE}/compile.json`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-            Accept:
-              "application/json",
-          },
-
-          body:
-            JSON.stringify({
-              compiler,
-              code,
-              stdin,
-              save: false,
-            }),
-
-          signal:
-            AbortSignal.timeout(
-              25_000,
-            ),
-        },
-      );
-
-      if (res.status === 429) {
-        await sleep(1000);
-        continue;
-      }
-
-      if (!res.ok) {
-        const detail =
-          (await res.text())
-            .slice(0, 500);
-
-        return {
-          stdout: "",
-          stderr:
-            `Wandbox HTTP ${res.status}: ${detail}`,
-          serviceError: true,
-          exitCode: -1,
-          runner:
-            `wandbox:${compiler}`,
-        };
-      }
-
-      const data =
-        await res.json();
-
-      const exitCode =
-        Number(
-          data.status ?? -1,
-        );
-
-      // Wandbox provides runtime and compiler errors separately.
-      // The previous implementation ignored program_error, which is
-      // why the UI only showed "Program exited with status 1."
-      const stdout =
-        String(
-          data.program_output ??
-            "",
-        );
-
-      const stderrParts = [
-        data.compiler_error,
-        data.program_error,
-      ]
-        .map((v) =>
-          String(v ?? "").trim(),
-        )
-        .filter(Boolean);
-
-      let stderr =
-        stderrParts.join("\n");
-
-      // Some Wandbox responses only populate the merged message field.
-      if (
-        exitCode !== 0 &&
-        !stderr
-      ) {
-        const merged =
-          String(
-            data.program_message ??
-              data.compiler_message ??
-              "",
-          ).trim();
-
-        if (
-          merged &&
-          normalizeOutput(merged) !==
-            normalizeOutput(stdout)
-        ) {
-          stderr = merged;
-        }
-      }
-
-      // If Wandbox gives a non-zero status with absolutely no diagnostic,
-      // invalidate the compiler cache once and retry using a newly-resolved
-      // stable compiler.
-      if (
-        exitCode !== 0 &&
-        !stdout &&
-        !stderr &&
-        attempt === 0
-      ) {
-        pythonCompilerCache = null;
-
-        try {
-          compiler =
-            await resolvePythonCompiler();
-        } catch {
-          // keep current compiler and allow the next loop to return
-        }
-
-        await sleep(500);
-        continue;
-      }
-
-      return {
-        stdout,
-        stderr,
-        serviceError: false,
-        exitCode,
-        runner:
-          `wandbox:${compiler}`,
-      };
-    } catch (e) {
-      if (attempt === 1) {
-        return {
-          stdout: "",
-          stderr:
-            `Could not reach Wandbox (${e})`,
-          serviceError: true,
-          exitCode: -1,
-          runner:
-            `wandbox:${compiler}`,
-        };
-      }
-
-      await sleep(700);
-    }
-  }
-
-  return {
-    stdout: "",
-    stderr:
-      "Wandbox did not return a usable result.",
-    serviceError: true,
-    exitCode: -1,
-    runner:
-      `wandbox:${compiler}`,
-  };
-}
-
-// ============================================================
-// Optional Piston for non-Python languages
-// ============================================================
-
-async function runPiston(
-  language: string,
-  code: string,
-  stdin: string,
-): Promise<RunOutcome> {
-  const langMap:
-    Record<
-      string,
-      {
-        language: string;
-        version: string;
-        file: string;
-      }
-    > = {
-      c: {
-        language: "c",
-        version: "10.2.0",
-        file: "main.c",
-      },
-
-      cpp: {
-        language: "c++",
-        version: "10.2.0",
-        file: "main.cpp",
-      },
-
-      java: {
-        language: "java",
-        version: "15.0.2",
-        file: "Main.java",
-      },
-
-      javascript: {
-        language:
-          "javascript",
-        version:
-          "18.15.0",
-        file:
-          "main.js",
-      },
-    };
-
-  const lang =
-    langMap[language];
-
-  if (!lang) {
-    return {
-      stdout: "",
-      stderr:
-        `Language not supported: ${language}`,
-      serviceError: true,
-      exitCode: -1,
-      runner: "piston",
-    };
-  }
-
+async function judge0Health() {
   try {
     const res = await fetch(
-      PISTON_URL,
+      `${JUDGE0_BASE}/languages`,
       {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-          Authorization:
-            PISTON_TOKEN,
-        },
-
-        body:
-          JSON.stringify({
-            language:
-              lang.language,
-            version:
-              lang.version,
-            files: [
-              {
-                name:
-                  lang.file,
-                content:
-                  code,
-              },
-            ],
-            stdin,
-            run_timeout:
-              5000,
-            compile_timeout:
-              10000,
-          }),
-
-        signal:
-          AbortSignal.timeout(
-            25_000,
-          ),
+        headers: judge0Headers(),
+        signal: AbortSignal.timeout(7000),
       },
     );
 
     if (!res.ok) {
       return {
-        stdout: "",
-        stderr:
-          `Piston HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`,
-        serviceError: true,
-        exitCode: -1,
-        runner: "piston",
+        ok: false,
+        detail: `HTTP ${res.status}`,
       };
     }
 
-    const data =
-      await res.json();
-
-    const exitCode =
-      Number(
-        data.run?.code ??
-          data.compile?.code ??
-          0,
-      );
+    const data = await res.json();
 
     return {
-      stdout:
-        String(
-          data.run?.stdout ??
-            "",
-        ),
+      ok: Array.isArray(data) && data.length > 0,
+      detail:
+        Array.isArray(data)
+          ? `${data.length} languages available`
+          : "unexpected response",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      detail: String(e),
+    };
+  }
+}
 
+async function runJudge0(
+  languageId: number,
+  code: string,
+  stdin: string,
+): Promise<RunOutcome> {
+  try {
+    // ----------------------------------------------------------
+    // Create asynchronous submission
+    // ----------------------------------------------------------
+    const createRes = await fetch(
+      `${JUDGE0_BASE}/submissions?base64_encoded=false&wait=false`,
+      {
+        method: "POST",
+        headers: {
+          ...judge0Headers(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          language_id: languageId,
+          source_code: code,
+          stdin,
+          cpu_time_limit: 5,
+          wall_time_limit: 10,
+          memory_limit: 128000,
+        }),
+        signal: AbortSignal.timeout(12000),
+      },
+    );
+
+    if (!createRes.ok) {
+      const detail =
+        (await createRes.text()).slice(0, 500);
+
+      return {
+        stdout: "",
+        stderr:
+          `Judge0 submission failed (HTTP ${createRes.status}): ${detail}`,
+        serviceError: true,
+        exitCode: -1,
+        runner: "judge0",
+        statusDescription: "provider error",
+      };
+    }
+
+    const created = await createRes.json();
+
+    const token =
+      String(created?.token ?? "");
+
+    if (!token) {
+      return {
+        stdout: "",
+        stderr:
+          "Judge0 did not return a submission token.",
+        serviceError: true,
+        exitCode: -1,
+        runner: "judge0",
+        statusDescription: "provider error",
+      };
+    }
+
+    // ----------------------------------------------------------
+    // Poll until processing is complete.
+    // Judge0 status:
+    //   1 = In Queue
+    //   2 = Processing
+    //   >=3 = completed
+    // ----------------------------------------------------------
+    for (let i = 0; i < MAX_POLLS; i++) {
+      await sleep(
+        i < 3 ? POLL_MS : Math.min(POLL_MS + i * 60, 900),
+      );
+
+      const resultRes = await fetch(
+        `${JUDGE0_BASE}/submissions/${token}?base64_encoded=false&fields=stdout,stderr,compile_output,message,status,time,memory`,
+        {
+          headers: judge0Headers(),
+          signal: AbortSignal.timeout(9000),
+        },
+      );
+
+      if (!resultRes.ok) {
+        if (resultRes.status >= 500) {
+          continue;
+        }
+
+        const detail =
+          (await resultRes.text()).slice(0, 500);
+
+        return {
+          stdout: "",
+          stderr:
+            `Judge0 result lookup failed (HTTP ${resultRes.status}): ${detail}`,
+          serviceError: true,
+          exitCode: -1,
+          runner: "judge0",
+          statusDescription: "provider error",
+        };
+      }
+
+      const data = await resultRes.json();
+
+      const statusId =
+        Number(data?.status?.id ?? 0);
+
+      const statusDescription =
+        String(data?.status?.description ?? "");
+
+      if (statusId === 1 || statusId === 2) {
+        continue;
+      }
+
+      const stdout =
+        String(data?.stdout ?? "");
+
+      const stderr = [
+        data?.compile_output,
+        data?.stderr,
+        data?.message,
+      ]
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean)
+        .join("\n");
+
+      // Judge0:
+      // status 3 = Accepted/completed normally.
+      // Other completed statuses are compile/runtime/time/etc failures.
+      const exitCode =
+        statusId === 3 ? 0 : 1;
+
+      return {
+        stdout,
+        stderr:
+          stderr ||
+          (
+            statusId === 3
+              ? ""
+              : statusDescription || "Program failed."
+          ),
+        serviceError: false,
+        exitCode,
+        runner: "judge0",
+        statusDescription,
+      };
+    }
+
+    return {
+      stdout: "",
       stderr:
-        String(
-          data.compile?.stderr ||
-            data.run?.stderr ||
-            "",
-        ).slice(0, 1500),
-
-      serviceError: false,
-      exitCode,
-      runner: "piston",
+        "Judge0 timed out while waiting for the submission.",
+      serviceError: true,
+      exitCode: -1,
+      runner: "judge0",
+      statusDescription: "timeout",
     };
   } catch (e) {
     return {
       stdout: "",
       stderr:
-        `Could not reach Piston (${e})`,
+        `Could not reach Judge0 (${e})`,
       serviceError: true,
       exitCode: -1,
-      runner: "piston",
+      runner: "judge0",
+      statusDescription: "provider error",
     };
   }
 }
 
-// ============================================================
-// Helpers
-// ============================================================
+function judge0Headers() {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
 
-function normalizeOutput(
-  value: unknown,
-) {
+  if (JUDGE0_AUTH_TOKEN) {
+    headers["X-Auth-Token"] =
+      JUDGE0_AUTH_TOKEN;
+  }
+
+  return headers;
+}
+
+function normalizeOutput(value: unknown) {
   return String(value ?? "")
     .replace(/\r\n/g, "\n")
     .trimEnd();
 }
 
-function compareVersion(
-  a: string,
-  b: string,
-) {
-  const pa =
-    (
-      a.match(
-        /\d+(?:\.\d+)+/,
-      )?.[0] ??
-      "0"
-    )
-      .split(".")
-      .map(Number);
-
-  const pb =
-    (
-      b.match(
-        /\d+(?:\.\d+)+/,
-      )?.[0] ??
-      "0"
-    )
-      .split(".")
-      .map(Number);
-
-  const n =
-    Math.max(
-      pa.length,
-      pb.length,
-    );
-
-  for (
-    let i = 0;
-    i < n;
-    i++
-  ) {
-    const diff =
-      (pa[i] ?? 0) -
-      (pb[i] ?? 0);
-
-    if (diff !== 0) {
-      return diff;
-    }
-  }
-
-  return 0;
-}
-
-function json(
-  body: unknown,
-  status = 200,
-) {
+function json(body: unknown, status = 200) {
   return new Response(
     JSON.stringify(body),
     {
       status,
-
       headers: {
         ...corsHeaders,
-
-        "Content-Type":
-          "application/json",
-
-        "Cache-Control":
-          "no-store",
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
       },
     },
   );
