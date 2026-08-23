@@ -2,7 +2,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
 Deno.serve(async (req) => {
@@ -15,11 +16,23 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { launch_token } = await req.json();
-    const rawLaunchToken = String(launch_token ?? "");
+    const body = await req.json();
 
-    if (rawLaunchToken.length < 32 || rawLaunchToken.length > 200) {
-      return json({ error: "Invalid secure launch token." }, 400);
+    const rawLaunchToken = String(body.launch_token ?? "").trim();
+    const entryCode = String(body.entry_code ?? "").trim();
+
+    if (!rawLaunchToken && !entryCode) {
+      return json(
+        { error: "Enter the 6-digit secure exam code." },
+        400,
+      );
+    }
+
+    if (entryCode && !/^\d{6}$/.test(entryCode)) {
+      return json(
+        { error: "The secure exam code must contain exactly 6 digits." },
+        400,
+      );
     }
 
     const admin = createClient(
@@ -27,28 +40,73 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const launchHash = await sha256(rawLaunchToken);
     const nowIso = new Date().toISOString();
 
-    const { data: claimed, error: claimError } = await admin
-      .from("seb_launch_tokens")
-      .update({ used_at: nowIso })
-      .eq("token_hash", launchHash)
-      .is("used_at", null)
-      .gt("expires_at", nowIso)
-      .select("student_id, exam_id")
-      .maybeSingle();
+    let claimed:
+      | { student_id: string; exam_id: string }
+      | null = null;
 
-    if (claimError || !claimed) {
+    // New reliable flow: student enters the short code inside SEB.
+    if (entryCode) {
+      const { data, error } = await admin
+        .from("seb_launch_tokens")
+        .update({ used_at: nowIso })
+        .eq("entry_code", entryCode)
+        .is("used_at", null)
+        .gt("expires_at", nowIso)
+        .select("student_id, exam_id")
+        .maybeSingle();
+
+      if (error) {
+        console.error("Entry-code claim failed:", error);
+      }
+
+      claimed = data;
+    } else {
+      // Keep old token flow available as a fallback.
+      if (
+        rawLaunchToken.length < 32 ||
+        rawLaunchToken.length > 200
+      ) {
+        return json(
+          { error: "Invalid secure launch token." },
+          400,
+        );
+      }
+
+      const launchHash = await sha256(rawLaunchToken);
+
+      const { data, error } = await admin
+        .from("seb_launch_tokens")
+        .update({ used_at: nowIso })
+        .eq("token_hash", launchHash)
+        .is("used_at", null)
+        .gt("expires_at", nowIso)
+        .select("student_id, exam_id")
+        .maybeSingle();
+
+      if (error) {
+        console.error("Launch-token claim failed:", error);
+      }
+
+      claimed = data;
+    }
+
+    if (!claimed) {
       return json(
-        { error: "This secure launch link has expired or was already used." },
+        {
+          error:
+            "This secure exam code is invalid, expired, or was already used.",
+        },
         401,
       );
     }
 
     const { data: exam, error: examError } = await admin
       .from("exams")
-      .select("id, exam_code, starts_at, ends_at, is_published")
+      .select(
+        "id, exam_code, starts_at, ends_at, is_published",
+      )
       .eq("id", claimed.exam_id)
       .single();
 
@@ -59,7 +117,10 @@ Deno.serve(async (req) => {
       Date.now() < new Date(exam.starts_at).getTime() ||
       Date.now() > new Date(exam.ends_at).getTime()
     ) {
-      return json({ error: "This exam is not open right now." }, 403);
+      return json(
+        { error: "This exam is not open right now." },
+        403,
+      );
     }
 
     const { data: submittedAttempt } = await admin
@@ -71,9 +132,13 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (submittedAttempt) {
-      return json({ error: "This exam has already been submitted." }, 403);
+      return json(
+        { error: "This exam has already been submitted." },
+        403,
+      );
     }
 
+    // Revoke any older SEB session for this student/exam.
     await admin
       .from("seb_exam_sessions")
       .update({ revoked_at: nowIso })
@@ -94,17 +159,29 @@ Deno.serve(async (req) => {
       });
 
     if (sessionError) {
-      console.error("Could not create SEB session:", sessionError);
-      return json({ error: "Could not create the secure exam session." }, 500);
+      console.error(
+        "Could not create SEB session:",
+        sessionError,
+      );
+
+      return json(
+        { error: "Could not create the secure exam session." },
+        500,
+      );
     }
 
     const { data: userData, error: userError } =
-      await admin.auth.admin.getUserById(claimed.student_id);
+      await admin.auth.admin.getUserById(
+        claimed.student_id,
+      );
 
     const email = userData.user?.email;
 
     if (userError || !email) {
-      return json({ error: "Student account could not be resolved." }, 500);
+      return json(
+        { error: "Student account could not be resolved." },
+        500,
+      );
     }
 
     const { data: link, error: linkError } =
@@ -113,10 +190,14 @@ Deno.serve(async (req) => {
         email,
       });
 
-    const authTokenHash = link?.properties?.hashed_token;
+    const authTokenHash =
+      link?.properties?.hashed_token;
 
     if (linkError || !authTokenHash) {
-      return json({ error: "Could not create the SEB sign-in session." }, 500);
+      return json(
+        { error: "Could not create the SEB sign-in session." },
+        500,
+      );
     }
 
     return json({
@@ -128,14 +209,23 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error(e);
-    return json({ error: "Unexpected server error." }, 500);
+
+    return json(
+      { error: "Unexpected server error." },
+      500,
+    );
   }
 });
 
 function randomToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const bytes = crypto.getRandomValues(
+    new Uint8Array(32),
+  );
+
   return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
+    .map((b) =>
+      b.toString(16).padStart(2, "0")
+    )
     .join("");
 }
 
@@ -146,7 +236,9 @@ async function sha256(value: string) {
   );
 
   return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
+    .map((b) =>
+      b.toString(16).padStart(2, "0")
+    )
     .join("");
 }
 
