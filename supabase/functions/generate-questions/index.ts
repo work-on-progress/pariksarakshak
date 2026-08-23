@@ -147,7 +147,7 @@ for (const model of MODELS) {
           responseMimeType: "application/json",
           responseSchema,
           temperature: mode === "import" ? 0.1 : 0.75,
-          maxOutputTokens: 8192,
+          maxOutputTokens: 16384,
         },
       }),
     },
