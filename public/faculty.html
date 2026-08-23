@@ -41,7 +41,7 @@
         <div class="panel-body">
           <div class="row">
             <label class="field"><span>Title</span>
-              <input id="title" placeholder="Virtualization Technology — Unit 1"></label>
+              <input id="title" placeholder="Python Programming — Unit 1"></label>
             <label class="field"><span>Exam code</span>
               <input id="code" placeholder="CSE423-U1" style="text-transform:uppercase"></label>
           </div>
@@ -50,12 +50,46 @@
             <label class="field"><span>Closes</span><input id="ends" type="datetime-local"></label>
             <label class="field"><span>Minutes allowed</span><input id="dur" type="number" value="60" min="5"></label>
           </div>
+
+          <!-- delivery mode -->
+          <p class="field-label">Where do students sit this paper?</p>
+          <div class="mode-picker" id="modePicker">
+            <label class="mode-card">
+              <input type="radio" name="delivery" value="seb" checked>
+              <b>Locked browser</b>
+              <span>Safe Exam Browser. The machine is locked: no screenshots, no other
+                windows, no virtual machines. The strongest option, and it needs SEB
+                installed on every machine.</span>
+            </label>
+            <label class="mode-card">
+              <input type="radio" name="delivery" value="browser">
+              <b>Ordinary browser</b>
+              <span>Chrome or Edge, full screen, with copy, paste and right-click off.
+                Switching away is recorded and shown to you live. It cannot stop a
+                screenshot or a phone — invigilate the room in person.</span>
+            </label>
+            <label class="mode-card">
+              <input type="radio" name="delivery" value="either">
+              <b>Either</b>
+              <span>Students use the locked browser where it is installed, and an
+                ordinary browser where it is not. Useful while you are rolling SEB out.</span>
+            </label>
+          </div>
+
           <label class="field"><span>Instructions shown before the paper opens</span>
             <textarea id="instructions" rows="2" placeholder="Anything specific to this paper — calculator allowed, rough sheets, and so on."></textarea></label>
-          <label class="check"><input type="checkbox" id="shuffleQ" checked>
-            <span>Give every student a different question order</span></label>
-          <label class="check"><input type="checkbox" id="shuffleO" checked>
-            <span>Shuffle the multiple-choice options too</span></label>
+
+          <div class="row">
+            <label class="field"><span>Warn the student after this many switches away</span>
+              <input id="warnAfter" type="number" value="3" min="0"></label>
+            <div>
+              <label class="check"><input type="checkbox" id="shuffleQ" checked>
+                <span>Different question order per student</span></label>
+              <label class="check"><input type="checkbox" id="shuffleO" checked>
+                <span>Shuffle the multiple-choice options too</span></label>
+            </div>
+          </div>
+
           <div class="actions">
             <button class="btn" id="createExam">Create paper</button>
             <span class="meta" style="color:var(--ink-3)">Times are your local time</span>
@@ -78,27 +112,87 @@
 
     <div class="split">
       <div class="stack">
+
+        <!-- source -->
         <div class="panel">
-          <div class="panel-head"><h2>Draft with AI</h2><span class="eyebrow">You approve every question</span></div>
+          <div class="panel-head"><h2>1 · Where the questions come from</h2></div>
           <div class="panel-body">
-            <label class="field"><span>Topic</span>
-              <input id="topic" placeholder="SQL indexing and query optimisation"></label>
-            <label class="field"><span>Lecture notes (optional — questions stay inside this text)</span>
-              <textarea id="sourceText" rows="4" placeholder="Paste the unit notes here."></textarea></label>
-            <div class="row-4">
-              <label class="field"><span>MCQ</span><input id="nMcq" type="number" value="5" min="0" max="20"></label>
-              <label class="field"><span>Blanks</span><input id="nCloze" type="number" value="2" min="0" max="10"></label>
-              <label class="field"><span>Long</span><input id="nLong" type="number" value="1" min="0" max="5"></label>
-              <label class="field"><span>Coding</span><input id="nCode" type="number" value="2" min="0" max="5"></label>
+            <div class="source-tabs" role="tablist">
+              <button id="src-topic" aria-selected="true">A topic</button>
+              <button id="src-notes" aria-selected="false">My notes</button>
+              <button id="src-paper" aria-selected="false">An existing paper</button>
             </div>
-            <div class="row">
-              <label class="field"><span>Difficulty</span>
-                <select id="difficulty">
-                  <option value="easy">Easy</option>
-                  <option value="moderate" selected>Moderate</option>
-                  <option value="hard">Hard</option>
+
+            <div class="source-pane active" id="pane-src-topic">
+              <label class="field"><span>Topic</span>
+                <input id="topic" placeholder="Loops and conditionals in Python"></label>
+              <p class="meta" style="color:var(--ink-3)">Questions are written from general
+                knowledge of this topic.</p>
+            </div>
+
+            <div class="source-pane" id="pane-src-notes">
+              <div class="dropzone" id="dropNotes">
+                <input type="file" id="notesFile" accept=".pdf,.docx,.txt,.md" hidden>
+                <b>Drop your notes here</b>
+                <span>PDF, Word or text · read in this browser, never uploaded</span>
+                <button class="btn ghost small" id="pickNotes">Choose a file</button>
+              </div>
+              <p id="notesStatus" class="notice hidden" style="margin-top:.7rem"></p>
+              <label class="field" style="margin-top:.7rem"><span>Or paste the notes</span>
+                <textarea id="sourceText" rows="5" placeholder="Paste the unit notes here."></textarea></label>
+              <p class="meta" style="color:var(--ink-3)">Questions will stay inside what this
+                text actually covers.</p>
+            </div>
+
+            <div class="source-pane" id="pane-src-paper">
+              <p class="muted" style="font-size:.92rem">Already have a question paper or a
+                question bank? Bring it in as it is. Nothing is rewritten.</p>
+              <div class="dropzone" id="dropPaper">
+                <input type="file" id="paperFile" accept=".pdf,.docx,.txt,.md" hidden>
+                <b>Drop the question paper here</b>
+                <span>PDF, Word or text</span>
+                <button class="btn ghost small" id="pickPaper">Choose a file</button>
+              </div>
+              <p id="paperStatus" class="notice hidden" style="margin-top:.7rem"></p>
+              <label class="field" style="margin-top:.7rem"><span>Or paste the questions</span>
+                <textarea id="paperText" rows="6" placeholder="1. What does len() return?&#10;A) the last index&#10;B) the number of items&#10;C) the memory size&#10;D) nothing&#10;Answer: B"></textarea></label>
+              <div class="actions">
+                <button class="btn" id="parseLocalBtn">Read them here</button>
+                <button class="btn ghost" id="parseAiBtn">Read them with AI</button>
+              </div>
+              <p class="meta" style="color:var(--ink-3);margin-top:.5rem">Try the first button
+                first — it is instant and free. Use AI when the layout is messy.</p>
+              <p id="importMsg" class="notice hidden" style="margin-top:.7rem"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- the mix -->
+        <div class="panel" id="mixPanel">
+          <div class="panel-head"><h2>2 · The mix</h2>
+            <span class="eyebrow" id="mixSummary"></span></div>
+          <div class="panel-body">
+            <div class="mix-head">
+              <span>Type</span><span>Difficulty</span><span>How many</span><span>Marks each</span><span></span>
+            </div>
+            <div id="mixRows"></div>
+            <div class="actions" style="margin-top:.6rem">
+              <button class="btn ghost small" id="addMixRow">Add a row</button>
+              <span class="spacer"></span>
+              <span class="meta" style="color:var(--ink-3)">Presets:</span>
+              <button class="btn ghost small" data-preset="quick">Quick quiz</button>
+              <button class="btn ghost small" data-preset="unit">Unit test</button>
+              <button class="btn ghost small" data-preset="coding">Coding practical</button>
+            </div>
+
+            <div class="row" style="margin-top:1rem">
+              <label class="field"><span>Coding level — what students may be assumed to know</span>
+                <select id="codingLevel">
+                  <option value="beginner" selected>Beginner — loops, conditionals, lists, simple functions</option>
+                  <option value="intermediate">Intermediate — dictionaries, recursion, sorting, comprehensions</option>
+                  <option value="advanced">Advanced — data structures, complexity, algorithms</option>
                 </select></label>
-              <label class="field"><span>Coding language</span>
+              <label class="field"><span>Programming language</span>
                 <select id="codeLang">
                   <option value="python" selected>Python</option>
                   <option value="c">C</option>
@@ -107,16 +201,27 @@
                   <option value="javascript">JavaScript</option>
                 </select></label>
             </div>
-            <div class="actions">
-              <button class="btn" id="genBtn">Draft questions</button>
+            <p class="meta" style="color:var(--ink-3)">The coding level binds every program
+              written, in coding questions and in code-based multiple choice alike. Beginner
+              rules out comprehensions, recursion, dictionaries and imported modules.</p>
+
+            <div class="actions" style="margin-top:1rem">
+              <button class="btn" id="genBtn">Write the questions</button>
               <button class="btn pass hidden" id="saveBtn">Save to paper</button>
-              <button class="btn ghost hidden" id="clearBtn">Discard draft</button>
+              <button class="btn ghost hidden" id="clearBtn">Discard</button>
             </div>
             <p id="genMsg" class="notice hidden" style="margin-top:.8rem"></p>
-            <div id="preview" style="margin-top:1.1rem"></div>
           </div>
         </div>
 
+        <!-- preview -->
+        <div class="panel hidden" id="previewPanel">
+          <div class="panel-head"><h2>3 · Read them before you save</h2>
+            <span class="eyebrow" id="previewCount"></span></div>
+          <div class="panel-body"><div id="preview"></div></div>
+        </div>
+
+        <!-- by hand -->
         <div class="panel">
           <div class="panel-head"><h2 id="manualHead">Write one by hand</h2></div>
           <div class="panel-body">
@@ -128,14 +233,29 @@
                   <option value="long">Long answer</option>
                   <option value="coding">Coding</option>
                 </select></label>
-              <label class="field"><span>Marks</span><input id="mMarks" type="number" value="1" min="0" step="0.5"></label>
-              <label class="field"><span>Language (coding)</span>
-                <select id="mLang">
-                  <option value="python">Python</option><option value="c">C</option>
-                  <option value="cpp">C++</option><option value="java">Java</option>
-                  <option value="javascript">JavaScript</option>
+              <label class="field"><span>Difficulty</span>
+                <select id="mDiff">
+                  <option value="easy">Easy</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="hard">Hard</option>
+                </select></label>
+              <label class="field"><span>Marks</span>
+                <input id="mMarks" type="number" value="1" min="0" step="0.5"></label>
+            </div>
+
+            <div id="mKindBox">
+              <label class="field"><span>Kind of multiple choice</span>
+                <select id="mKind">
+                  <option value="theory">Theory — a question in words</option>
+                  <option value="output">Code output — what does this print</option>
+                  <option value="error">Find the mistake — what is wrong with this code</option>
+                  <option value="blank">Complete the code — which option fills the ____</option>
                 </select></label>
             </div>
+
+            <label class="field" id="mSnippetBox"><span>Code shown above the question</span>
+              <textarea id="mSnippet" rows="5" class="mono-input" placeholder="for i in range(3):&#10;    print(i * 2)"></textarea></label>
+
             <label class="field"><span>Question</span>
               <textarea id="mPrompt" rows="3" placeholder="For fill-in-the-blanks use ____ for each blank."></textarea></label>
 
@@ -158,12 +278,21 @@
             </div>
 
             <div id="mCodingBox" class="hidden">
+              <label class="field"><span>Language</span>
+                <select id="mLang">
+                  <option value="python">Python</option><option value="c">C</option>
+                  <option value="cpp">C++</option><option value="java">Java</option>
+                  <option value="javascript">JavaScript</option>
+                </select></label>
               <label class="field"><span>Starter code</span>
                 <textarea id="mStarter" rows="4" class="mono-input"></textarea></label>
               <p class="meta" style="color:var(--ink-3)">Test cases — tick "hidden" for the ones students must not see</p>
               <div id="mTests"></div>
               <button class="btn ghost small" id="addTest">Add a test case</button>
             </div>
+
+            <label class="field"><span>Why the answer is right (optional)</span>
+              <input id="mExplain" placeholder="Shown to students when you release results."></label>
 
             <div class="actions" style="margin-top:1rem">
               <button class="btn" id="mSave">Add to paper</button>
@@ -176,7 +305,10 @@
 
       <div class="panel">
         <div class="panel-head"><h2>In this paper</h2><span class="eyebrow" id="qCount"></span></div>
-        <div class="panel-body"><div id="questionList"></div></div>
+        <div class="panel-body">
+          <div id="blueprint" class="blueprint"></div>
+          <div id="questionList"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -191,7 +323,7 @@
             comma, then the name. Passwords are generated and shown once — download the CSV
             and hand out the slips.</p>
           <label class="field"><span>Roll list</span>
-            <textarea id="rollList" rows="8" class="mono-input" placeholder="23BCS114, Aarti Sharma&#10;23BCS115, Rohit Verma&#10;23BCS116, Simran Kaur"></textarea></label>
+            <textarea id="rollList" rows="8" class="mono-input" placeholder="23BCS114, Aarti Sharma&#10;23BCS115, Rohit Verma"></textarea></label>
           <div class="actions">
             <button class="btn" id="createStudents">Create accounts</button>
             <button class="btn ghost hidden" id="downloadCreds">Download the slips (CSV)</button>
@@ -224,16 +356,13 @@
   <section class="pane" id="pane-room">
     <label class="field" style="max-width:520px"><span>Watching paper</span>
       <select id="roomExam"></select></label>
-
     <div class="stats" id="roomStats"></div>
-
     <div class="split">
       <div class="panel">
         <div class="panel-head"><h2>Who is in the room</h2>
           <button class="btn ghost tiny" id="refreshRoom" style="margin-left:auto">Refresh</button></div>
         <div class="panel-body"><div id="roster" class="roster"></div></div>
       </div>
-
       <div class="panel">
         <div class="panel-head"><h2>Incidents, as they happen</h2><span class="eyebrow" id="liveState">connecting…</span></div>
         <div class="panel-body"><div id="feed" class="feed"></div></div>
@@ -245,14 +374,13 @@
   <section class="pane" id="pane-results">
     <label class="field" style="max-width:520px"><span>Paper</span>
       <select id="resultExam"></select></label>
-
-    <div class="stack">
+    
+      <div class="stack">
       <div class="panel">
         <div class="panel-head"><h2>Marks</h2>
           <button class="btn ghost small" id="exportBtn" style="margin-left:auto">Export CSV</button></div>
         <div class="panel-body"><div id="resultsTable"></div></div>
       </div>
-
       <div class="panel">
         <div class="panel-head"><h2>Long answers to mark</h2><span class="eyebrow" id="longCount"></span></div>
         <div class="panel-body"><div id="longAnswers"></div></div>

@@ -3,14 +3,15 @@ import {
   supabase, callFunction, requireUser, signOut, downloadCsv, escapeHtml,
 } from "./supabaseClient.js";
 import { INSTITUTE_NAME, STUDENT_EMAIL_DOMAIN } from "./config.js";
+import { extractText, parseQuestions } from "./docimport.js";
 
 let user, profile;
 let exams = [];
-let draft = null;             // AI questions awaiting approval
-let editingQuestionId = null; // set while editing an existing question
-let credentials = [];         // freshly created student logins
+let draft = null;
+let editingQuestionId = null;
+let credentials = [];
 let resultRows = [];
-const names = {};             // student_id → profile
+const names = {};
 
 boot();
 
@@ -25,7 +26,9 @@ async function boot() {
 
   setUpTabs();
   wirePapers();
-  wireQuestions();
+  wireSources();
+  wireMix();
+  wireManual();
   wireStudents();
   wireRoom();
   wireResults();
@@ -35,7 +38,7 @@ async function boot() {
   loadStudents();
 }
 
-/* ══════════════ TABS ══════════════ */
+/* ══════════════ SHELL ══════════════ */
 const PANES = ["papers", "questions", "students", "room", "results"];
 function setUpTabs() {
   PANES.forEach((name) => {
@@ -53,7 +56,7 @@ function setUpTabs() {
 
 function note(id, text, kind) {
   const el = document.getElementById(id);
-  el.textContent = text;
+  el.innerHTML = text;
   el.className = `notice ${kind ?? ""}`;
   el.classList.toggle("hidden", !text);
 }
@@ -64,7 +67,7 @@ const fmt = (iso) => new Date(iso).toLocaleString([], {
 const isLive = (e) => e.is_published &&
   new Date(e.starts_at) <= new Date() && new Date() <= new Date(e.ends_at);
 
-/* ══════════════ 1. PAPERS ══════════════ */
+/* ══════════════ 1 · PAPERS ══════════════ */
 function wirePapers() {
   document.getElementById("createExam").onclick = createExam;
 }
@@ -83,6 +86,12 @@ async function loadExams() {
     if (keep) sel.value = keep;
   });
 
+  const MODE_TAG = {
+    seb: `<span class="tag pass">locked browser</span>`,
+    browser: `<span class="tag warn">ordinary browser</span>`,
+    either: `<span class="tag">either</span>`,
+  };
+
   document.getElementById("examList").innerHTML = exams.length
     ? exams.map((e) => `
       <div class="list-row">
@@ -91,7 +100,8 @@ async function loadExams() {
           <span class="title">${escapeHtml(e.title)}</span><br>
           <span class="when">${fmt(e.starts_at)} → ${fmt(e.ends_at)} · ${e.duration_min} min</span>
         </span>
-        <span style="margin-left:auto;display:flex;gap:.4rem;align-items:center">
+        <span style="margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+          ${MODE_TAG[e.delivery_mode ?? "seb"]}
           <span class="tag ${isLive(e) ? "pass" : ""}">${isLive(e) ? "live now" : e.is_published ? "closed" : "draft"}</span>
           <button class="btn ghost tiny" data-toggle="${e.id}">${e.is_published ? "Unpublish" : "Publish"}</button>
           <button class="btn ghost tiny" data-del="${e.id}">Delete</button>
@@ -119,6 +129,7 @@ async function loadExams() {
 async function createExam() {
   const title = val("title"), code = val("code").toUpperCase();
   const starts = val("starts"), ends = val("ends"), dur = Number(val("dur"));
+  const delivery = document.querySelector('input[name="delivery"]:checked')?.value ?? "seb";
 
   if (!title || !code || !starts || !ends) {
     return note("examMsg", "Fill in the title, code and both times before creating the paper.", "error");
@@ -134,85 +145,340 @@ async function createExam() {
     ends_at: new Date(ends).toISOString(),
     duration_min: dur,
     is_published: true,
+    delivery_mode: delivery,
+    browser_warn_after: Number(val("warnAfter")) || 0,
     shuffle_questions: document.getElementById("shuffleQ").checked,
     shuffle_options: document.getElementById("shuffleO").checked,
   });
 
   if (error) {
     return note("examMsg",
-      error.code === "23505" ? "That exam code is already in use. Pick another." : error.message, "error");
+      error.code === "23505" ? "That exam code is already in use. Pick another."
+        : error.message.includes("delivery_mode")
+        ? "The database does not know about delivery modes yet. Run migration 005."
+        : error.message, "error");
   }
-  note("examMsg", `Paper created. Students join with the code ${code}.`, "ok");
+
+  const modeWord = delivery === "browser" ? "an ordinary browser"
+    : delivery === "either" ? "either browser" : "Safe Exam Browser";
+  note("examMsg", `Paper created. Students join with <b>${escapeHtml(code)}</b>, sitting it in ${modeWord}.`, "ok");
   ["title", "code", "instructions"].forEach((id) => (document.getElementById(id).value = ""));
   loadExams();
 }
 
-/* ══════════════ 2. QUESTIONS ══════════════ */
-function wireQuestions() {
+/* ══════════════ 2 · WHERE QUESTIONS COME FROM ══════════════ */
+let importedText = "";       // notes, for generation
+let paperText = "";          // an existing paper, for import
+
+function wireSources() {
   document.getElementById("examSelect").onchange = loadQuestions;
-  document.getElementById("genBtn").onclick = draftQuestions;
-  document.getElementById("saveBtn").onclick = saveDraft;
-  document.getElementById("clearBtn").onclick = () => { draft = null; renderDraft(); note("genMsg", "", ""); };
-  document.getElementById("mType").onchange = switchManualType;
-  document.getElementById("addTest").onclick = () => addTestRow();
-  document.getElementById("mSave").onclick = saveManual;
-  document.getElementById("mCancel").onclick = resetManualForm;
-  switchManualType();
-  addTestRow("1 2 3", "6", false);
-  addTestRow("", "", true);
-}
 
-async function draftQuestions() {
-  const examId = val("examSelect");
-  if (!examId) return note("genMsg", "Create a paper first, then draft questions for it.", "error");
-  if (!val("topic") && !val("sourceText")) {
-    return note("genMsg", "Give a topic, or paste the lecture notes to draw from.", "error");
-  }
-
-  const btn = document.getElementById("genBtn");
-  btn.disabled = true; btn.textContent = "Drafting…";
-  note("genMsg", "Writing questions. This takes a few seconds.", "");
-
-  const res = await callFunction("generate-questions", {
-    topic: val("topic"),
-    source_text: val("sourceText"),
-    difficulty: val("difficulty"),
-    language: val("codeLang"),
-    distribution: {
-      mcq: +val("nMcq"), cloze: +val("nCloze"),
-      long: +val("nLong"), coding: +val("nCode"),
-    },
+  const tabs = ["topic", "notes", "paper"];
+  tabs.forEach((t) => {
+    document.getElementById(`src-${t}`).onclick = () => {
+      tabs.forEach((x) => {
+        document.getElementById(`src-${x}`).setAttribute("aria-selected", String(x === t));
+        document.getElementById(`pane-src-${x}`).classList.toggle("active", x === t);
+      });
+      // Reading an existing paper is its own path; the mix does not apply.
+      document.getElementById("mixPanel").classList.toggle("hidden", t === "paper");
+    };
   });
 
-  btn.disabled = false; btn.textContent = "Draft questions";
-  if (res.error) return note("genMsg", res.error, "error");
+  wireDrop("dropNotes", "notesFile", "pickNotes", "notesStatus", (text) => {
+    importedText = text;
+    document.getElementById("sourceText").value = text.slice(0, 4000);
+  });
+  wireDrop("dropPaper", "paperFile", "pickPaper", "paperStatus", (text) => {
+    paperText = text;
+    document.getElementById("paperText").value = text.slice(0, 6000);
+  });
 
-  draft = res.questions ?? [];
-  note("genMsg", `${draft.length} questions drafted. Read them, edit anything, then save.`, "ok");
+  document.getElementById("parseLocalBtn").onclick = importLocally;
+  document.getElementById("parseAiBtn").onclick = importWithAi;
+}
+
+function wireDrop(zoneId, inputId, buttonId, statusId, done) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+
+  document.getElementById(buttonId).onclick = () => input.click();
+  input.onchange = () => input.files[0] && read(input.files[0]);
+
+  ["dragenter", "dragover"].forEach((ev) =>
+    zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) =>
+    zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.remove("over"); }));
+  zone.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files[0];
+    if (f) read(f);
+  });
+
+  async function read(file) {
+    note(statusId, `Reading ${escapeHtml(file.name)}…`, "");
+    try {
+      const { text, pages, warning } = await extractText(file);
+      if (warning) { note(statusId, warning, "warn"); }
+      else {
+        note(statusId,
+          `Read ${escapeHtml(file.name)} — ${text.length.toLocaleString()} characters${pages ? ` from ${pages} pages` : ""}. Nothing was uploaded.`,
+          "ok");
+      }
+      done(text);
+    } catch (e) {
+      note(statusId, escapeHtml(String(e.message ?? e)), "error");
+    }
+  }
+}
+
+/* ── reading an existing paper ── */
+function currentPaperText() {
+  return val("paperText") || paperText;
+}
+
+function importLocally() {
+  const text = currentPaperText();
+  if (!text) return note("importMsg", "Upload a file or paste the questions first.", "error");
+
+  const { questions, note: summary, withoutKey } = parseQuestions(text);
+  if (!questions.length) return note("importMsg", summary, "warn");
+
+  draft = questions;
+  note("importMsg", summary, withoutKey ? "warn" : "ok");
   renderDraft();
 }
 
+async function importWithAi() {
+  const text = currentPaperText();
+  if (!text) return note("importMsg", "Upload a file or paste the questions first.", "error");
+
+  const btn = document.getElementById("parseAiBtn");
+  btn.disabled = true; btn.textContent = "Reading…";
+  note("importMsg", "Reading the document. Nothing is being invented — only what is written is kept.", "");
+
+  const res = await callFunction("generate-questions", { mode: "import", source_text: text });
+
+  btn.disabled = false; btn.textContent = "Read them with AI";
+  if (res.error) return note("importMsg", escapeHtml(res.error), "error");
+
+  draft = res.questions;
+  const missing = draft.filter((q) => q.qtype === "mcq" && !q.correct_key).length;
+  note("importMsg",
+    `Read ${draft.length} questions${missing ? `, ${missing} without a marked answer — set those before saving` : ""}.`,
+    missing ? "warn" : "ok");
+  renderDraft();
+}
+
+/* ══════════════ 3 · THE MIX ══════════════ */
+const MIX_TYPES = [
+  { value: "mcq:theory", label: "MCQ — theory", marks: 1 },
+  { value: "mcq:output", label: "MCQ — what does this code print", marks: 1 },
+  { value: "mcq:error",  label: "MCQ — find the mistake in the code", marks: 1 },
+  { value: "mcq:blank",  label: "MCQ — complete the code", marks: 1 },
+  { value: "cloze",      label: "Fill in the blanks", marks: 1 },
+  { value: "long",       label: "Long answer", marks: 5 },
+  { value: "coding",     label: "Coding problem", marks: 10 },
+];
+
+const PRESETS = {
+  quick: [
+    ["mcq:theory", "easy", 5, 1],
+    ["mcq:theory", "medium", 3, 1],
+    ["mcq:output", "medium", 2, 1],
+  ],
+  unit: [
+    ["mcq:theory", "easy", 5, 1],
+    ["mcq:theory", "medium", 3, 1],
+    ["mcq:output", "medium", 2, 1],
+    ["mcq:error", "hard", 1, 1],
+    ["cloze", "easy", 3, 1],
+    ["long", "medium", 2, 5],
+  ],
+  coding: [
+    ["mcq:output", "easy", 3, 1],
+    ["mcq:blank", "medium", 2, 1],
+    ["coding", "easy", 1, 10],
+    ["coding", "medium", 1, 10],
+  ],
+};
+
+function wireMix() {
+  document.getElementById("addMixRow").onclick = () => addMixRow();
+  document.querySelectorAll("[data-preset]").forEach((b) => {
+    b.onclick = () => applyPreset(b.dataset.preset);
+  });
+  document.getElementById("genBtn").onclick = generate;
+  document.getElementById("saveBtn").onclick = saveDraft;
+  document.getElementById("clearBtn").onclick = () => {
+    draft = null; renderDraft(); note("genMsg", "", "");
+  };
+  applyPreset("unit");
+}
+
+function applyPreset(name) {
+  document.getElementById("mixRows").innerHTML = "";
+  (PRESETS[name] ?? PRESETS.unit).forEach(([type, diff, count, marks]) =>
+    addMixRow(type, diff, count, marks));
+  updateMixSummary();
+}
+
+function addMixRow(type = "mcq:theory", difficulty = "medium", count = 5, marks = 1) {
+  const row = document.createElement("div");
+  row.className = "mix-row";
+  row.innerHTML = `
+    <select class="mix-type">${MIX_TYPES.map((t) =>
+      `<option value="${t.value}" ${t.value === type ? "selected" : ""}>${t.label}</option>`).join("")}</select>
+    <select class="mix-diff">
+      ${["easy", "medium", "hard"].map((d) =>
+        `<option value="${d}" ${d === difficulty ? "selected" : ""}>${d}</option>`).join("")}
+    </select>
+    <input class="mix-count" type="number" min="0" max="30" value="${count}">
+    <input class="mix-marks" type="number" min="0" step="0.5" value="${marks}">
+    <button class="btn ghost tiny mix-drop">Remove</button>`;
+
+  row.querySelector(".mix-drop").onclick = () => { row.remove(); updateMixSummary(); };
+  row.querySelector(".mix-type").onchange = (e) => {
+    const preset = MIX_TYPES.find((t) => t.value === e.target.value);
+    if (preset) row.querySelector(".mix-marks").value = preset.marks;
+    updateMixSummary();
+  };
+  row.querySelectorAll("input, select").forEach((el) => el.addEventListener("input", updateMixSummary));
+
+  document.getElementById("mixRows").appendChild(row);
+  updateMixSummary();
+}
+
+function readMix() {
+  return [...document.querySelectorAll(".mix-row")].map((row) => {
+    const [qtype, kind] = row.querySelector(".mix-type").value.split(":");
+    return {
+      qtype,
+      mcq_kind: kind ?? "theory",
+      difficulty: row.querySelector(".mix-diff").value,
+      count: Number(row.querySelector(".mix-count").value) || 0,
+      marks: Number(row.querySelector(".mix-marks").value) || 1,
+    };
+  }).filter((r) => r.count > 0);
+}
+
+function updateMixSummary() {
+  const mix = readMix();
+  const n = mix.reduce((s, r) => s + r.count, 0);
+  const marks = mix.reduce((s, r) => s + r.count * r.marks, 0);
+  const byDiff = { easy: 0, medium: 0, hard: 0 };
+  mix.forEach((r) => { byDiff[r.difficulty] += r.count; });
+
+  document.getElementById("mixSummary").textContent = n
+    ? `${n} questions · ${marks} marks · ${byDiff.easy} easy, ${byDiff.medium} medium, ${byDiff.hard} hard`
+    : "nothing selected";
+}
+
+async function generate() {
+  const examId = val("examSelect");
+  if (!examId) return note("genMsg", "Create a paper first, then write questions for it.", "error");
+
+  const mix = readMix();
+  if (!mix.length) return note("genMsg", "Add at least one row to the mix, with a count above zero.", "error");
+
+  const topic = val("topic");
+  const source = val("sourceText") || importedText;
+  if (!topic && !source) {
+    return note("genMsg", "Give a topic, or upload your notes on the tab above.", "error");
+  }
+
+  const total = mix.reduce((s, r) => s + r.count, 0);
+  if (total > 30) {
+    return note("genMsg", "Ask for 30 questions or fewer at a time — long requests come back trimmed. Run it twice.", "error");
+  }
+
+  const btn = document.getElementById("genBtn");
+  btn.disabled = true; btn.textContent = "Writing…";
+  note("genMsg", `Writing ${total} questions. This takes a few seconds.`, "");
+
+  const res = await callFunction("generate-questions", {
+    mode: "generate",
+    topic,
+    source_text: source,
+    mix,
+    coding_level: val("codingLevel"),
+    language: val("codeLang"),
+  });
+
+  btn.disabled = false; btn.textContent = "Write the questions";
+  if (res.error) return note("genMsg", escapeHtml(res.error), "error");
+
+  draft = res.questions;
+  const asked = total, got = draft.length;
+  note("genMsg",
+    got === asked
+      ? `${got} questions written. Read them, edit anything, then save.`
+      : `${got} questions came back out of ${asked} asked for. Save these and run it again for the rest.`,
+    got === asked ? "ok" : "warn");
+  renderDraft();
+}
+
+/* ══════════════ THE PREVIEW ══════════════ */
+const KIND_LABEL = { theory: "theory", output: "code output", error: "find the mistake", blank: "complete the code" };
+
 function renderDraft() {
+  const panel = document.getElementById("previewPanel");
   const box = document.getElementById("preview");
-  document.getElementById("saveBtn").classList.toggle("hidden", !draft?.length);
-  document.getElementById("clearBtn").classList.toggle("hidden", !draft?.length);
-  if (!draft?.length) { box.innerHTML = ""; return; }
+  const has = !!draft?.length;
+
+  panel.classList.toggle("hidden", !has);
+  document.getElementById("saveBtn").classList.toggle("hidden", !has);
+  document.getElementById("clearBtn").classList.toggle("hidden", !has);
+  if (!has) { box.innerHTML = ""; return; }
+
+  const marks = draft.reduce((s, q) => s + Number(q.marks || 0), 0);
+  document.getElementById("previewCount").textContent = `${draft.length} questions · ${marks} marks`;
 
   box.innerHTML = "";
   draft.forEach((q, i) => {
     const el = document.createElement("div");
     el.className = "qprev";
     el.dataset.type = q.qtype;
+    const needsKey = q.qtype === "mcq" && !q.correct_key;
+
     el.innerHTML = `
-      <header><b>Q${i + 1} · ${q.qtype.toUpperCase()} · ${q.marks}m</b>
-        <button class="drop">Remove</button></header>
-      <textarea rows="3"></textarea>
-      ${q.qtype === "mcq" ? `<p class="answer">Key ${escapeHtml(q.correct_key)} — ${(q.options ?? []).map(escapeHtml).join("   ")}</p>` : ""}
-      ${q.qtype === "cloze" ? `<p class="answer">Answers: ${(q.cloze_answers ?? []).map(escapeHtml).join(", ")}</p>` : ""}
-      ${q.qtype === "coding" ? `<p class="tests">${(q.test_cases ?? []).length} tests · ${(q.test_cases ?? []).filter((t) => !t.is_hidden).length} shown to students, rest hidden</p>` : ""}`;
-    const ta = el.querySelector("textarea");
+      <header>
+        <b>Q${i + 1}</b>
+        <span class="tag ${{ mcq: "blue", cloze: "warn", long: "", coding: "pass" }[q.qtype]}">${q.qtype}</span>
+        ${q.qtype === "mcq" ? `<span class="tag">${KIND_LABEL[q.mcq_kind] ?? q.mcq_kind}</span>` : ""}
+        <span class="tag diff-${q.difficulty}">${q.difficulty}</span>
+        <span class="tag">${q.marks}m</span>
+        ${needsKey ? `<span class="tag seal">answer missing</span>` : ""}
+        <button class="drop">Remove</button>
+      </header>
+      <textarea rows="2" class="q-prompt"></textarea>
+      ${q.code_snippet ? `<pre class="snippet-prev"></pre>` : ""}
+      <div class="opts"></div>
+      ${q.qtype === "cloze" ? `<p class="answer">Answers: ${escapeHtml((q.cloze_answers ?? []).join(", ") || "(set these before saving)")}</p>` : ""}
+      ${q.qtype === "coding" ? `<p class="tests">${(q.test_cases ?? []).length} tests · ${(q.test_cases ?? []).filter((t) => !t.is_hidden).length} shown to students</p>` : ""}
+      ${q.explanation ? `<p class="why">${escapeHtml(q.explanation)}</p>` : ""}`;
+
+    const ta = el.querySelector(".q-prompt");
     ta.value = q.prompt;
     ta.oninput = () => { q.prompt = ta.value; };
+
+    if (q.code_snippet) el.querySelector(".snippet-prev").textContent = q.code_snippet;
+
+    if (q.qtype === "mcq") {
+      const opts = el.querySelector(".opts");
+      (q.options ?? []).forEach((opt, idx) => {
+        const letter = String.fromCharCode(65 + idx);
+        const row = document.createElement("label");
+        row.className = "opt-row" + (q.correct_key === letter ? " correct" : "");
+        row.innerHTML = `<input type="radio" name="key-${i}" ${q.correct_key === letter ? "checked" : ""}>
+                         <span>${escapeHtml(opt)}</span>`;
+        row.querySelector("input").onchange = () => {
+          q.correct_key = letter;
+          renderDraft();
+        };
+        opts.appendChild(row);
+      });
+    }
+
     el.querySelector(".drop").onclick = () => { draft.splice(i, 1); renderDraft(); };
     box.appendChild(el);
   });
@@ -222,6 +488,13 @@ async function saveDraft() {
   const exam_id = val("examSelect");
   if (!exam_id || !draft?.length) return;
 
+  const missing = draft.filter((q) => q.qtype === "mcq" && !q.correct_key);
+  if (missing.length) {
+    return note("genMsg",
+      `${missing.length} multiple-choice question${missing.length === 1 ? " has" : "s have"} no answer marked. Click the correct option on each before saving.`,
+      "error");
+  }
+
   const btn = document.getElementById("saveBtn");
   btn.disabled = true; btn.textContent = "Saving…";
 
@@ -230,7 +503,12 @@ async function saveDraft() {
 
   for (const q of draft) {
     const { data: row, error } = await supabase.from("questions").insert({
-      exam_id, qtype: q.qtype, position: position++, marks: q.marks, prompt: q.prompt,
+      exam_id, qtype: q.qtype, position: position++,
+      marks: q.marks, prompt: q.prompt,
+      difficulty: q.difficulty ?? "medium",
+      mcq_kind: q.qtype === "mcq" ? (q.mcq_kind ?? "theory") : "theory",
+      code_snippet: q.code_snippet || null,
+      explanation: q.explanation || null,
       options: q.options?.length ? q.options : null,
       correct_key: q.correct_key || null,
       cloze_answers: q.cloze_answers?.length ? q.cloze_answers : null,
@@ -241,12 +519,17 @@ async function saveDraft() {
 
     if (error) {
       btn.disabled = false; btn.textContent = "Save to paper";
-      return note("genMsg", `Stopped after ${saved} questions: ${error.message}`, "error");
+      return note("genMsg",
+        `Stopped after ${saved} questions: ${escapeHtml(error.message)}` +
+        (error.message.includes("difficulty") || error.message.includes("mcq_kind")
+          ? " — this looks like migration 005 has not been run yet." : ""),
+        "error");
     }
+
     if (q.qtype === "coding" && q.test_cases?.length) {
       await supabase.from("test_cases").insert(q.test_cases.map((t, i) => ({
-        question_id: row.id, stdin: t.stdin, expected_out: t.expected_out,
-        is_hidden: t.is_hidden, position: i + 1,
+        question_id: row.id, stdin: t.stdin ?? "", expected_out: t.expected_out ?? "",
+        is_hidden: t.is_hidden !== false, position: i + 1,
       })));
     }
     saved++;
@@ -265,38 +548,52 @@ async function nextPosition(exam_id) {
   return (count ?? 0) + 1;
 }
 
-/* ---- the by-hand editor ---- */
+/* ══════════════ BY HAND ══════════════ */
+function wireManual() {
+  document.getElementById("mType").onchange = switchManualType;
+  document.getElementById("mKind").onchange = switchManualType;
+  document.getElementById("addTest").onclick = () => addTestRow();
+  document.getElementById("mSave").onclick = saveManual;
+  document.getElementById("mCancel").onclick = resetManualForm;
+  switchManualType();
+  addTestRow("", "", false);
+  addTestRow("", "", true);
+}
+
 function switchManualType() {
   const t = val("mType");
+  const kind = val("mKind");
   document.getElementById("mMcqBox").classList.toggle("hidden", t !== "mcq");
+  document.getElementById("mKindBox").classList.toggle("hidden", t !== "mcq");
   document.getElementById("mClozeBox").classList.toggle("hidden", t !== "cloze");
   document.getElementById("mCodingBox").classList.toggle("hidden", t !== "coding");
-  const marks = document.getElementById("mMarks");
-  if (!editingQuestionId) marks.value = t === "coding" ? 10 : t === "long" ? 5 : 1;
+  document.getElementById("mSnippetBox").classList.toggle(
+    "hidden", !(t === "mcq" && kind !== "theory"));
+
+  if (!editingQuestionId) {
+    document.getElementById("mMarks").value = t === "coding" ? 10 : t === "long" ? 5 : 1;
+  }
 }
 
 function addTestRow(stdin = "", expected = "", hidden = true) {
   const row = document.createElement("div");
   row.className = "testrow";
   row.innerHTML = `
-    <input placeholder="input" value="${escapeHtml(stdin)}">
-    <input placeholder="expected output" value="${escapeHtml(expected)}">
-    <label><input type="checkbox" ${hidden ? "checked" : ""}> hidden</label>
+    <input class="t-in" placeholder="input" value="${escapeHtml(stdin)}">
+    <input class="t-out" placeholder="expected output" value="${escapeHtml(expected)}">
+    <label><input type="checkbox" class="t-hidden" ${hidden ? "checked" : ""}> hidden</label>
     <button class="btn ghost tiny">×</button>`;
   row.querySelector("button").onclick = () => row.remove();
   document.getElementById("mTests").appendChild(row);
 }
 
 function readTestRows() {
-  return [...document.querySelectorAll("#mTests .testrow")].map((r, i) => {
-    const [stdin, expected] = r.querySelectorAll("input[type='text'], input:not([type])");
-    return {
-      stdin: stdin.value,
-      expected_out: expected.value,
-      is_hidden: r.querySelector("input[type='checkbox']").checked,
-      position: i + 1,
-    };
-  }).filter((t) => t.expected_out !== "");
+  return [...document.querySelectorAll("#mTests .testrow")].map((r, i) => ({
+    stdin: r.querySelector(".t-in").value,
+    expected_out: r.querySelector(".t-out").value,
+    is_hidden: r.querySelector(".t-hidden").checked,
+    position: i + 1,
+  })).filter((t) => t.expected_out !== "");
 }
 
 async function saveManual() {
@@ -309,14 +606,21 @@ async function saveManual() {
 
   const row = {
     exam_id, qtype, marks: Number(val("mMarks")) || 1, prompt,
+    difficulty: val("mDiff"),
+    mcq_kind: qtype === "mcq" ? val("mKind") : "theory",
+    code_snippet: null, explanation: val("mExplain") || null,
     options: null, correct_key: null, cloze_answers: null,
     language: null, starter_code: null,
   };
 
   if (qtype === "mcq") {
-    const opts = ["A", "B", "C", "D"]
-      .map((L) => ({ L, text: val("mOpt" + L) }))
-      .filter((o) => o.text);
+    if (val("mKind") !== "theory") {
+      row.code_snippet = document.getElementById("mSnippet").value;
+      if (!row.code_snippet.trim()) {
+        return note("mMsg", "This kind of question needs the code that goes above it.", "error");
+      }
+    }
+    const opts = ["A", "B", "C", "D"].map((L) => ({ L, text: val("mOpt" + L) })).filter((o) => o.text);
     if (opts.length < 2) return note("mMsg", "Give at least two options.", "error");
     row.options = opts.map((o) => `${o.L}) ${o.text}`);
     row.correct_key = val("mKey");
@@ -335,36 +639,31 @@ async function saveManual() {
     row.cloze_answers = answers;
   }
 
+  let tests = null;
   if (qtype === "coding") {
     row.language = val("mLang");
     row.starter_code = document.getElementById("mStarter").value;
-    const tests = readTestRows();
+    tests = readTestRows();
     if (tests.length < 2) return note("mMsg", "Add at least two test cases with an expected output.", "error");
     if (!tests.some((t) => !t.is_hidden)) {
       return note("mMsg", "Leave at least one test visible so students see the format.", "error");
     }
-    row._tests = tests;
   }
-
-  const tests = row._tests;
-  delete row._tests;
 
   if (editingQuestionId) {
     const { error } = await supabase.from("questions").update(row).eq("id", editingQuestionId);
-    if (error) return note("mMsg", error.message, "error");
+    if (error) return note("mMsg", escapeHtml(error.message), "error");
     if (qtype === "coding") {
       await supabase.from("test_cases").delete().eq("question_id", editingQuestionId);
-      await supabase.from("test_cases").insert(
-        tests.map((t) => ({ ...t, question_id: editingQuestionId })));
+      await supabase.from("test_cases").insert(tests.map((t) => ({ ...t, question_id: editingQuestionId })));
     }
     note("mMsg", "Question updated.", "ok");
   } else {
     row.position = await nextPosition(exam_id);
     const { data, error } = await supabase.from("questions").insert(row).select("id").single();
-    if (error) return note("mMsg", error.message, "error");
+    if (error) return note("mMsg", escapeHtml(error.message), "error");
     if (qtype === "coding") {
-      await supabase.from("test_cases").insert(
-        tests.map((t) => ({ ...t, question_id: data.id })));
+      await supabase.from("test_cases").insert(tests.map((t) => ({ ...t, question_id: data.id })));
     }
     note("mMsg", "Question added to the paper.", "ok");
   }
@@ -378,7 +677,7 @@ function resetManualForm() {
   document.getElementById("manualHead").textContent = "Write one by hand";
   document.getElementById("mSave").textContent = "Add to paper";
   document.getElementById("mCancel").classList.add("hidden");
-  ["mPrompt", "mOptA", "mOptB", "mOptC", "mOptD", "mCloze", "mStarter"]
+  ["mPrompt", "mOptA", "mOptB", "mOptC", "mOptD", "mCloze", "mStarter", "mSnippet", "mExplain"]
     .forEach((id) => (document.getElementById(id).value = ""));
   document.getElementById("mTests").innerHTML = "";
   addTestRow("", "", false);
@@ -389,7 +688,12 @@ function resetManualForm() {
 async function loadQuestions() {
   const exam_id = val("examSelect");
   const box = document.getElementById("questionList");
-  if (!exam_id) { box.innerHTML = `<p class="empty">Create a paper first.</p>`; return; }
+  const blueprint = document.getElementById("blueprint");
+  if (!exam_id) {
+    box.innerHTML = `<p class="empty">Create a paper first.</p>`;
+    blueprint.innerHTML = "";
+    return;
+  }
 
   const { data: qs } = await supabase.from("questions")
     .select("*, test_cases(count)").eq("exam_id", exam_id).order("position");
@@ -398,14 +702,25 @@ async function loadQuestions() {
   document.getElementById("qCount").textContent =
     qs?.length ? `${qs.length} questions · ${total} marks` : "empty";
 
-  if (!qs?.length) { box.innerHTML = `<p class="empty">No questions yet. Draft some, or write one by hand.</p>`; return; }
+  if (!qs?.length) {
+    blueprint.innerHTML = "";
+    box.innerHTML = `<p class="empty">No questions yet. Write some above, or import a paper you already have.</p>`;
+    return;
+  }
+
+  const counts = { easy: 0, medium: 0, hard: 0 };
+  qs.forEach((q) => { counts[q.difficulty ?? "medium"] = (counts[q.difficulty ?? "medium"] ?? 0) + 1; });
+  blueprint.innerHTML = ["easy", "medium", "hard"].map((d) =>
+    `<span class="tag diff-${d}">${counts[d]} ${d}</span>`).join(" ");
 
   box.innerHTML = qs.map((q, i) => `
     <div class="list-row">
       <span class="tag ${{ mcq: "blue", cloze: "warn", long: "", coding: "pass" }[q.qtype]}">${q.qtype}</span>
       <span>
-        <span class="title">Q${i + 1}. ${escapeHtml(q.prompt.slice(0, 90))}${q.prompt.length > 90 ? "…" : ""}</span><br>
-        <span class="when">${q.marks} marks${q.qtype === "coding" ? ` · ${q.test_cases?.[0]?.count ?? 0} tests` : ""}</span>
+        <span class="title">Q${i + 1}. ${escapeHtml(q.prompt.slice(0, 80))}${q.prompt.length > 80 ? "…" : ""}</span><br>
+        <span class="when">${q.difficulty ?? "medium"} · ${q.marks} marks${
+          q.qtype === "mcq" && q.mcq_kind !== "theory" ? ` · ${KIND_LABEL[q.mcq_kind] ?? q.mcq_kind}` : ""}${
+          q.qtype === "coding" ? ` · ${q.test_cases?.[0]?.count ?? 0} tests` : ""}</span>
       </span>
       <span class="tools" style="margin-left:auto;display:flex;gap:.3rem">
         <button class="btn ghost tiny" data-edit="${q.id}">Edit</button>
@@ -432,15 +747,18 @@ async function editQuestion(q) {
   document.getElementById("mCancel").classList.remove("hidden");
 
   document.getElementById("mType").value = q.qtype;
+  document.getElementById("mDiff").value = q.difficulty ?? "medium";
+  document.getElementById("mKind").value = q.mcq_kind ?? "theory";
   document.getElementById("mMarks").value = q.marks;
   document.getElementById("mPrompt").value = q.prompt;
+  document.getElementById("mSnippet").value = q.code_snippet ?? "";
+  document.getElementById("mExplain").value = q.explanation ?? "";
   switchManualType();
 
   if (q.qtype === "mcq") {
     const opts = Array.isArray(q.options) ? q.options : [];
     ["A", "B", "C", "D"].forEach((L, i) => {
-      document.getElementById("mOpt" + L).value =
-        (opts[i] ?? "").replace(/^[A-D]\)\s*/, "");
+      document.getElementById("mOpt" + L).value = (opts[i] ?? "").replace(/^[A-D]\)\s*/, "");
     });
     document.getElementById("mKey").value = q.correct_key ?? "A";
   }
@@ -458,7 +776,7 @@ async function editQuestion(q) {
   document.getElementById("mPrompt").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-/* ══════════════ 3. STUDENTS ══════════════ */
+/* ══════════════ 4 · STUDENTS ══════════════ */
 function wireStudents() {
   document.getElementById("createStudents").onclick = createStudents;
   document.getElementById("downloadCreds").onclick = () =>
@@ -486,7 +804,7 @@ async function createStudents() {
   });
 
   btn.disabled = false; btn.textContent = "Create accounts";
-  if (res.error) return note("studentMsg", res.error, "error");
+  if (res.error) return note("studentMsg", escapeHtml(res.error), "error");
 
   credentials = res.created ?? [];
   const skipped = res.skipped ?? [];
@@ -510,8 +828,8 @@ async function resetPassword() {
   const roll = val("resetRoll");
   if (!roll) return note("resetMsg", "Type the roll number.", "error");
   const res = await callFunction("manage-students", { action: "reset_password", roll_no: roll });
-  if (res.error) return note("resetMsg", res.error, "error");
-  note("resetMsg", `${res.full_name || roll} — new password: ${res.password}`, "ok");
+  if (res.error) return note("resetMsg", escapeHtml(res.error), "error");
+  note("resetMsg", `${escapeHtml(res.full_name || roll)} — new password: <b>${escapeHtml(res.password)}</b>`, "ok");
 }
 
 async function loadStudents() {
@@ -525,7 +843,7 @@ async function loadStudents() {
     : `<p class="empty">No students yet. Create them on the left.</p>`;
 }
 
-/* ══════════════ 4. THE ROOM ══════════════ */
+/* ══════════════ 5 · THE ROOM ══════════════ */
 const SEVERITY = {
   MULTIPLE_FACES_DETECTED: "high", SEB_CHECK_FAILED: "high",
   NO_FACE_DETECTED: "mid", FULLSCREEN_EXIT: "mid",
@@ -534,10 +852,10 @@ const SEVERITY = {
 const WORDING = {
   MULTIPLE_FACES_DETECTED: "more than one face in frame",
   NO_FACE_DETECTED: "no face in frame",
-  WINDOW_BLUR: "window lost focus",
-  TAB_HIDDEN: "tab hidden",
+  WINDOW_BLUR: "switched away from the window",
+  TAB_HIDDEN: "switched to another tab",
   FULLSCREEN_EXIT: "left full screen",
-  SEB_CHECK_FAILED: "opened outside Safe Exam Browser",
+  SEB_CHECK_FAILED: "tried to open outside Safe Exam Browser",
 };
 
 function wireRoom() {
@@ -578,8 +896,7 @@ async function loadRoom() {
 
   if (!attempts?.length) { box.innerHTML = `<p class="empty">Nobody has started this paper yet.</p>`; return; }
 
-  const sorted = [...attempts].sort((a, b) =>
-    (flags[b.student_id] ?? 0) - (flags[a.student_id] ?? 0));
+  const sorted = [...attempts].sort((a, b) => (flags[b.student_id] ?? 0) - (flags[a.student_id] ?? 0));
 
   box.innerHTML = sorted.map((a) => {
     const who = names[a.student_id] ?? {};
@@ -650,7 +967,7 @@ async function nameOf(id) {
   return names[id];
 }
 
-/* ══════════════ 5. RESULTS ══════════════ */
+/* ══════════════ 6 · RESULTS ══════════════ */
 function wireResults() {
   document.getElementById("resultExam").onchange = loadResults;
   document.getElementById("exportBtn").onclick = () => {
@@ -732,10 +1049,10 @@ async function loadLongAnswers(exam_id, attempts) {
       const who = names[a?.student_id] ?? {};
       return `<tr>
         <td class="num">${escapeHtml(who.roll_no ?? "—")}</td>
-        <td>${escapeHtml(r.answer_text ?? "(blank)").slice(0, 400)}</td>
+        <td>${escapeHtml((r.answer_text ?? "(blank)").slice(0, 400))}</td>
         <td class="num">${r.questions.marks}</td>
         <td><input type="number" step="0.5" min="0" max="${r.questions.marks}"
-                   value="${r.auto_marks ?? ""}" data-mark="${r.id}" data-attempt="${r.attempt_id}"></td>
+                   value="${r.auto_marks ?? ""}" data-mark="${r.id}"></td>
       </tr>`;
     }).join("")}</tbody></table>`;
 
