@@ -37,7 +37,7 @@
   <section class="pane active" id="pane-papers">
     <div class="split">
       <div class="panel">
-        <div class="panel-head"><h2>New paper</h2></div>
+        <div class="panel-head"><h2 id="paperFormTitle">New paper</h2></div>
         <div class="panel-body">
           <div class="row">
             <label class="field"><span>Title</span>
@@ -92,6 +92,7 @@
 
           <div class="actions">
             <button class="btn" id="createExam">Create paper</button>
+            <button class="btn ghost hidden" id="cancelExamEdit">Cancel edit</button>
             <span class="meta" style="color:var(--ink-3)">Times are your local time</span>
           </div>
           <p id="examMsg" class="notice hidden" style="margin-top:.8rem"></p>
@@ -374,8 +375,7 @@
   <section class="pane" id="pane-results">
     <label class="field" style="max-width:520px"><span>Paper</span>
       <select id="resultExam"></select></label>
-    
-      <div class="stack">
+    <div class="stack">
       <div class="panel">
         <div class="panel-head"><h2>Marks</h2>
           <button class="btn ghost small" id="exportBtn" style="margin-left:auto">Export CSV</button></div>

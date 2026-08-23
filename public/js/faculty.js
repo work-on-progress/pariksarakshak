@@ -8,6 +8,7 @@ import { extractText, parseQuestions } from "./docimport.js";
 let user, profile;
 let exams = [];
 let draft = null;
+let editingExamId = null;
 let editingQuestionId = null;
 let credentials = [];
 let resultRows = [];
@@ -69,7 +70,54 @@ const isLive = (e) => e.is_published &&
 
 /* ══════════════ 1 · PAPERS ══════════════ */
 function wirePapers() {
-  document.getElementById("createExam").onclick = createExam;
+  document.getElementById("createExam").onclick = createOrUpdateExam;
+  document.getElementById("cancelExamEdit").onclick = resetExamForm;
+}
+
+function toLocalInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function resetExamForm() {
+  editingExamId = null;
+  document.getElementById("paperFormTitle").textContent = "New paper";
+  document.getElementById("createExam").textContent = "Create paper";
+  document.getElementById("cancelExamEdit").classList.add("hidden");
+  ["title", "code", "starts", "ends", "instructions"].forEach((id) => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("dur").value = 60;
+  document.getElementById("warnAfter").value = 3;
+  document.getElementById("shuffleQ").checked = true;
+  document.getElementById("shuffleO").checked = true;
+  const seb = document.querySelector('input[name="delivery"][value="seb"]');
+  if (seb) seb.checked = true;
+  note("examMsg", "", "");
+}
+
+function beginExamEdit(id) {
+  const e = exams.find((x) => x.id === id);
+  if (!e) return;
+  editingExamId = e.id;
+  document.getElementById("paperFormTitle").textContent = `Edit paper · ${e.exam_code}`;
+  document.getElementById("createExam").textContent = "Save changes";
+  document.getElementById("cancelExamEdit").classList.remove("hidden");
+  document.getElementById("title").value = e.title ?? "";
+  document.getElementById("code").value = e.exam_code ?? "";
+  document.getElementById("starts").value = toLocalInput(e.starts_at);
+  document.getElementById("ends").value = toLocalInput(e.ends_at);
+  document.getElementById("dur").value = e.duration_min ?? 60;
+  document.getElementById("instructions").value = e.instructions ?? "";
+  document.getElementById("warnAfter").value = e.browser_warn_after ?? 3;
+  document.getElementById("shuffleQ").checked = e.shuffle_questions !== false;
+  document.getElementById("shuffleO").checked = e.shuffle_options !== false;
+  const mode = document.querySelector(`input[name="delivery"][value="${e.delivery_mode ?? "seb"}"]`);
+  if (mode) mode.checked = true;
+  note("examMsg", "Editing this paper. Changes apply to future/resumed loads. Avoid changing duration while students are actively sitting unless you intend to.", "warn");
+  document.getElementById("pane-papers").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function loadExams() {
@@ -83,7 +131,7 @@ async function loadExams() {
     const sel = document.getElementById(id);
     const keep = sel.value;
     sel.innerHTML = options || `<option value="">Create a paper first</option>`;
-    if (keep) sel.value = keep;
+    if (keep && exams.some((e) => e.id === keep)) sel.value = keep;
   });
 
   const MODE_TAG = {
@@ -103,53 +151,77 @@ async function loadExams() {
         <span style="margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
           ${MODE_TAG[e.delivery_mode ?? "seb"]}
           <span class="tag ${isLive(e) ? "pass" : ""}">${isLive(e) ? "live now" : e.is_published ? "closed" : "draft"}</span>
+          <button class="btn ghost tiny" data-edit-exam="${e.id}">Edit</button>
           <button class="btn ghost tiny" data-toggle="${e.id}">${e.is_published ? "Unpublish" : "Publish"}</button>
           <button class="btn ghost tiny" data-del="${e.id}">Delete</button>
         </span>
       </div>`).join("")
     : `<p class="empty">No papers yet. Create one on the left.</p>`;
 
+  document.querySelectorAll("[data-edit-exam]").forEach((b) => {
+    b.onclick = () => beginExamEdit(b.dataset.editExam);
+  });
   document.querySelectorAll("[data-toggle]").forEach((b) => {
     b.onclick = async () => {
       const e = exams.find((x) => x.id === b.dataset.toggle);
-      await supabase.from("exams").update({ is_published: !e.is_published }).eq("id", e.id);
+      const { error } = await supabase.from("exams").update({ is_published: !e.is_published }).eq("id", e.id);
+      if (error) return alert(error.message);
       loadExams();
     };
   });
   document.querySelectorAll("[data-del]").forEach((b) => {
     b.onclick = async () => {
       const e = exams.find((x) => x.id === b.dataset.del);
-      if (!confirm(`Delete ${e.exam_code} with all its questions and attempts? This cannot be undone.`)) return;
-      await supabase.from("exams").delete().eq("id", e.id);
+      if (!confirm(`Delete ${e.exam_code} with all questions, attempts, answers and incidents? This cannot be undone.`)) return;
+      const { error } = await supabase.from("exams").delete().eq("id", e.id);
+      if (error) return alert(error.message);
+      if (editingExamId === e.id) resetExamForm();
       loadExams();
+      loadQuestions();
+      loadRoom();
+      loadResults();
     };
   });
 }
 
-async function createExam() {
+async function createOrUpdateExam() {
   const title = val("title"), code = val("code").toUpperCase();
   const starts = val("starts"), ends = val("ends"), dur = Number(val("dur"));
   const delivery = document.querySelector('input[name="delivery"]:checked')?.value ?? "seb";
 
   if (!title || !code || !starts || !ends) {
-    return note("examMsg", "Fill in the title, code and both times before creating the paper.", "error");
+    return note("examMsg", "Fill in the title, code and both times.", "error");
   }
   if (new Date(ends) <= new Date(starts)) {
     return note("examMsg", "The closing time must be after the opening time.", "error");
   }
+  if (!Number.isFinite(dur) || dur < 5) {
+    return note("examMsg", "Minutes allowed must be at least 5.", "error");
+  }
 
-  const { error } = await supabase.from("exams").insert({
-    faculty_id: user.id, title, exam_code: code,
-    instructions: val("instructions") || undefined,
+  const payload = {
+    title,
+    exam_code: code,
+    instructions: val("instructions") || null,
     starts_at: new Date(starts).toISOString(),
     ends_at: new Date(ends).toISOString(),
     duration_min: dur,
-    is_published: true,
     delivery_mode: delivery,
     browser_warn_after: Number(val("warnAfter")) || 0,
     shuffle_questions: document.getElementById("shuffleQ").checked,
     shuffle_options: document.getElementById("shuffleO").checked,
-  });
+  };
+
+  let error;
+  if (editingExamId) {
+    ({ error } = await supabase.from("exams").update(payload).eq("id", editingExamId));
+  } else {
+    ({ error } = await supabase.from("exams").insert({
+      ...payload,
+      faculty_id: user.id,
+      is_published: true,
+    }));
+  }
 
   if (error) {
     return note("examMsg",
@@ -159,11 +231,15 @@ async function createExam() {
         : error.message, "error");
   }
 
-  const modeWord = delivery === "browser" ? "an ordinary browser"
-    : delivery === "either" ? "either browser" : "Safe Exam Browser";
-  note("examMsg", `Paper created. Students join with <b>${escapeHtml(code)}</b>, sitting it in ${modeWord}.`, "ok");
-  ["title", "code", "instructions"].forEach((id) => (document.getElementById(id).value = ""));
-  loadExams();
+  if (editingExamId) {
+    note("examMsg", `Paper <b>${escapeHtml(code)}</b> updated.`, "ok");
+  } else {
+    const modeWord = delivery === "browser" ? "an ordinary browser"
+      : delivery === "either" ? "either browser" : "Safe Exam Browser";
+    note("examMsg", `Paper created. Students join with <b>${escapeHtml(code)}</b>, sitting it in ${modeWord}.`, "ok");
+  }
+  resetExamForm();
+  await loadExams();
 }
 
 /* ══════════════ 2 · WHERE QUESTIONS COME FROM ══════════════ */
@@ -836,11 +912,85 @@ async function loadStudents() {
   const { data } = await supabase.from("profiles")
     .select("id, full_name, roll_no, role").eq("role", "student").order("roll_no");
   document.getElementById("studentCount").textContent = data?.length ? `${data.length} enrolled` : "none yet";
-  document.getElementById("studentList").innerHTML = data?.length
+  const box = document.getElementById("studentList");
+  box.innerHTML = data?.length
     ? data.map((s) => `<div class="roster-row">
         <span class="roll">${escapeHtml(s.roll_no ?? "—")}</span>
-        <span>${escapeHtml(s.full_name ?? "")}</span></div>`).join("")
+        <span>${escapeHtml(s.full_name ?? "")}</span>
+        <span class="tools" style="margin-left:auto;display:flex;gap:.35rem;flex-wrap:wrap">
+          <button class="btn ghost tiny" data-edit-student="${s.id}">Edit</button>
+          <button class="btn ghost tiny" data-reset-student-pw="${escapeHtml(s.roll_no ?? "")}">Reset password</button>
+          <button class="btn ghost tiny" data-delete-student="${s.id}">Delete</button>
+        </span>
+      </div>`).join("")
     : `<p class="empty">No students yet. Create them on the left.</p>`;
+
+  box.querySelectorAll("[data-edit-student]").forEach((b) => {
+    b.onclick = async () => {
+      const s = data.find((x) => x.id === b.dataset.editStudent);
+      if (!s) return;
+      const roll = prompt("Roll number", s.roll_no ?? "");
+      if (roll === null) return;
+      const name = prompt("Student name", s.full_name ?? "");
+      if (name === null) return;
+      const res = await callFunction("manage-students", {
+        action: "update",
+        student_id: s.id,
+        roll_no: roll.trim(),
+        full_name: name.trim(),
+        email_domain: STUDENT_EMAIL_DOMAIN,
+      });
+      if (res.error) return alert(`Could not update student: ${res.error}`);
+      delete names[s.id];
+      await loadStudents();
+      alert(`Updated ${res.roll_no ?? roll}.`);
+    };
+  });
+
+  box.querySelectorAll("[data-reset-student-pw]").forEach((b) => {
+    b.onclick = async () => {
+      const roll = b.dataset.resetStudentPw;
+      if (!roll) return;
+      const res = await callFunction("manage-students", { action: "reset_password", roll_no: roll });
+      if (res.error) return alert(`Could not reset password: ${res.error}`);
+      alert(`${res.full_name || roll}
+New password: ${res.password}`);
+    };
+  });
+
+  box.querySelectorAll("[data-delete-student]").forEach((b) => {
+    b.onclick = async () => {
+      const s = data.find((x) => x.id === b.dataset.deleteStudent);
+      if (!s) return;
+      if (!confirm(`Delete ${s.full_name || s.roll_no || "this student"}?
+
+This removes the login account, attempts, answers, incidents and exam sessions. This cannot be undone.`)) return;
+      const res = await callFunction("manage-students", { action: "delete", student_id: s.id });
+      if (res.error) return alert(`Could not delete student: ${res.error}`);
+      delete names[s.id];
+      await loadStudents();
+      await loadRoom();
+      await loadResults();
+    };
+  });
+}
+
+async function resetAttempt(examId, studentId, label = "this student") {
+  if (!confirm(`Reset ${label}'s attempt?
+
+Their answers, incidents and attempt record for this paper will be removed. They can then take the paper again.`)) return false;
+  const { error } = await supabase.rpc("reset_student_attempt", {
+    p_exam_id: examId,
+    p_student_id: studentId,
+  });
+  if (error) {
+    alert(`Could not reset attempt: ${error.message}`);
+    return false;
+  }
+  alert("Attempt reset. The student can take this paper again.");
+  await loadRoom();
+  await loadResults();
+  return true;
 }
 
 /* ══════════════ 5 · THE ROOM ══════════════ */
@@ -909,6 +1059,7 @@ async function loadRoom() {
       <span class="tools">
         <button class="btn ghost tiny" data-extra="${a.id}">+5 min</button>
         ${a.status !== "in_progress" ? `<button class="btn ghost tiny" data-unlock="${a.id}">Unlock</button>` : ""}
+        <button class="btn ghost tiny" data-reset-attempt="${a.student_id}" data-student-label="${escapeHtml(who.full_name || who.roll_no || "student")}">Reset / reattempt</button>
       </span>
     </div>`;
   }).join("");
@@ -927,6 +1078,11 @@ async function loadRoom() {
       const { error } = await supabase.rpc("reopen_attempt", { p_attempt_id: b.dataset.unlock });
       if (error) alert(error.message);
       loadRoom();
+    };
+  });
+  box.querySelectorAll("[data-reset-attempt]").forEach((b) => {
+    b.onclick = async () => {
+      await resetAttempt(exam_id, b.dataset.resetAttempt, b.dataset.studentLabel);
     };
   });
 }
@@ -999,6 +1155,7 @@ async function loadResults() {
   for (const a of attempts) {
     const who = await nameOf(a.student_id);
     resultRows.push({
+      attemptId: a.id, studentId: a.student_id,
       roll: who.roll_no ?? "", name: who.full_name ?? "",
       score: a.score ?? "", status: a.status,
       submitted: a.submitted_at ? new Date(a.submitted_at).toLocaleString() : "",
@@ -1016,14 +1173,21 @@ async function loadResults() {
       <div><strong>${scores.length ? Math.max(...scores) : "—"}</strong><span>highest</span></div>
     </div>
     <table class="results">
-      <thead><tr><th>Roll</th><th>Name</th><th>Score</th><th>Status</th></tr></thead>
+      <thead><tr><th>Roll</th><th>Name</th><th>Score</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>${resultRows.map((r) => `<tr>
         <td class="num">${escapeHtml(r.roll)}</td>
         <td>${escapeHtml(r.name)}</td>
         <td class="num">${r.score}</td>
         <td><span class="tag ${r.status === "submitted" ? "pass" : ""}">${r.status.replace("_", " ")}</span></td>
+        <td><button class="btn ghost tiny" data-result-reset="${r.studentId}" data-result-label="${escapeHtml(r.name || r.roll || "student")}">Reset / reattempt</button></td>
       </tr>`).join("")}</tbody>
     </table>`;
+
+  box.querySelectorAll("[data-result-reset]").forEach((b) => {
+    b.onclick = async () => {
+      await resetAttempt(exam_id, b.dataset.resultReset, b.dataset.resultLabel);
+    };
+  });
 
   loadLongAnswers(exam_id, attempts);
 }
@@ -1067,42 +1231,4 @@ async function loadLongAnswers(exam_id, attempts) {
       loadResults();
     };
   });
-}
-async function resetAttempt(examId, studentId, label = "this student") {
-  if (!confirm(
-    `Reset ${label}'s attempt?\n\nTheir saved answers, incidents and attempt record for this paper will be removed, and they can take the exam again.`
-  )) return;
-
-  const { error } = await supabase.rpc("reset_student_attempt", {
-    p_exam_id: examId,
-    p_student_id: studentId,
-  });
-
-  if (error) {
-    alert(`Could not reset attempt: ${error.message}`);
-    return;
-  }
-
-  alert("Attempt reset. The student can take this paper again.");
-  loadResults();
-  loadRoom();
-}
-
-async function deleteStudentRecord(studentId, label = "this student") {
-  if (!confirm(
-    `Delete ${label}?\n\nThis removes their PariksaRakshak profile, attempts, answers and exam sessions. This cannot be undone.`
-  )) return;
-
-  const { error } = await supabase.rpc("delete_student_record", {
-    p_student_id: studentId,
-  });
-
-  if (error) {
-    alert(`Could not delete student: ${error.message}`);
-    return;
-  }
-
-  alert("Student records deleted.");
-  loadStudents();
-  loadResults();
 }
