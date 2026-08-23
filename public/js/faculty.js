@@ -1068,3 +1068,41 @@ async function loadLongAnswers(exam_id, attempts) {
     };
   });
 }
+async function resetAttempt(examId, studentId, label = "this student") {
+  if (!confirm(
+    `Reset ${label}'s attempt?\n\nTheir saved answers, incidents and attempt record for this paper will be removed, and they can take the exam again.`
+  )) return;
+
+  const { error } = await supabase.rpc("reset_student_attempt", {
+    p_exam_id: examId,
+    p_student_id: studentId,
+  });
+
+  if (error) {
+    alert(`Could not reset attempt: ${error.message}`);
+    return;
+  }
+
+  alert("Attempt reset. The student can take this paper again.");
+  loadResults();
+  loadRoom();
+}
+
+async function deleteStudentRecord(studentId, label = "this student") {
+  if (!confirm(
+    `Delete ${label}?\n\nThis removes their PariksaRakshak profile, attempts, answers and exam sessions. This cannot be undone.`
+  )) return;
+
+  const { error } = await supabase.rpc("delete_student_record", {
+    p_student_id: studentId,
+  });
+
+  if (error) {
+    alert(`Could not delete student: ${error.message}`);
+    return;
+  }
+
+  alert("Student records deleted.");
+  loadStudents();
+  loadResults();
+}
