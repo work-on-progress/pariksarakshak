@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
     const { data: exam } = await admin
       .from("exams")
       .select(
-        "id, exam_code, title, starts_at, ends_at, is_published",
+        "id, exam_code, title, starts_at, ends_at, is_published, delivery_mode",
       )
       .eq("exam_code", code)
       .maybeSingle();
@@ -170,6 +170,8 @@ Deno.serve(async (req) => {
       launch_token: rawLaunchToken,
       entry_code: entryCode,
       exam_code: exam.exam_code,
+      exam_title: exam.title,
+      delivery_mode: exam.delivery_mode ?? "seb",
       expires_at: expiresAt,
     });
   } catch (e) {

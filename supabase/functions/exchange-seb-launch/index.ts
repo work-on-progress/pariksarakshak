@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
     const { data: exam, error: examError } = await admin
       .from("exams")
       .select(
-        "id, exam_code, starts_at, ends_at, is_published",
+        "id, exam_code, starts_at, ends_at, is_published, delivery_mode, browser_warn_after",
       )
       .eq("id", claimed.exam_id)
       .single();
@@ -205,6 +205,9 @@ Deno.serve(async (req) => {
       session_token: rawSessionToken,
       exam_code: exam.exam_code,
       exam_id: exam.id,
+      // The exam page needs this before it decides whether to demand SEB.
+      delivery_mode: exam.delivery_mode ?? "seb",
+      browser_warn_after: exam.browser_warn_after ?? 3,
       expires_at: exam.ends_at,
     });
   } catch (e) {
