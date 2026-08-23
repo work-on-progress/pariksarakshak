@@ -268,3 +268,113 @@ table.results input { width: 70px; font-family: var(--mono); padding: .25rem .4r
   .student-exam-card { flex-direction: column; align-items: flex-start; }
   .student-exam-card .card-action, .student-exam-card .btn { width: 100%; }
 }
+
+/* =========================================================================
+   Added for delivery modes, the mix builder, document import and the
+   six-digit entry code.
+   ========================================================================= */
+
+/* ---------- difficulty tags ---------- */
+.tag.diff-easy   { background: var(--pass-wash); color: var(--pass); border-color: transparent; }
+.tag.diff-medium { background: var(--blue-wash); color: var(--blue-deep); border-color: transparent; }
+.tag.diff-hard   { background: var(--seal-wash); color: var(--seal); border-color: transparent; }
+
+.field-label {
+  font-family: var(--mono); font-size: .68rem; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--ink-3); margin: .2rem 0 .5rem;
+}
+
+/* ---------- how a paper is delivered ---------- */
+.mode-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin-bottom: 1rem; }
+.mode-card {
+  display: block; cursor: pointer; padding: .85rem;
+  border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  background: var(--card-2); transition: border-color .15s ease, background .15s ease;
+}
+.mode-card:hover { border-color: var(--blue); }
+.mode-card input { width: auto; margin-right: .4rem; accent-color: var(--blue); }
+.mode-card b { font-size: .92rem; }
+.mode-card span { display: block; font-size: .8rem; color: var(--ink-2); margin-top: .3rem; line-height: 1.4; }
+.mode-card:has(input:checked) { border-color: var(--blue); background: var(--blue-wash); }
+
+/* ---------- where questions come from ---------- */
+.source-tabs { display: flex; gap: .35rem; border-bottom: 1px solid var(--rule); margin-bottom: 1rem; }
+.source-tabs button {
+  padding: .5rem .9rem; border: none; background: none; cursor: pointer;
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-3);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.source-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--blue); }
+.source-pane { display: none; }
+.source-pane.active { display: block; }
+
+.dropzone {
+  border: 2px dashed var(--rule); border-radius: var(--radius);
+  padding: 1.5rem; text-align: center; background: var(--card-2);
+  transition: border-color .15s ease, background .15s ease;
+}
+.dropzone.over { border-color: var(--blue); background: var(--blue-wash); }
+.dropzone b { display: block; font-size: .95rem; }
+.dropzone span { display: block; font-family: var(--mono); font-size: .66rem;
+  color: var(--ink-3); margin: .35rem 0 .75rem; letter-spacing: .06em; }
+
+/* ---------- the mix builder ---------- */
+.mix-head, .mix-row {
+  display: grid; grid-template-columns: 2.4fr 1fr .8fr .8fr auto;
+  gap: .5rem; align-items: center;
+}
+.mix-head {
+  font-family: var(--mono); font-size: .62rem; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--ink-3); padding-bottom: .4rem;
+  border-bottom: 1px solid var(--rule); margin-bottom: .5rem;
+}
+.mix-row { margin-bottom: .45rem; }
+.mix-row select, .mix-row input { padding: .4rem .55rem; font-size: .87rem; }
+
+/* ---------- the preview ---------- */
+.qprev .q-prompt { font-size: .9rem; background: var(--card); margin-bottom: .5rem; }
+.qprev .snippet-prev, .snippet {
+  font-family: var(--mono); font-size: .82rem; line-height: 1.5;
+  background: var(--card-2); border: 1px solid var(--rule);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-sm); padding: .7rem .85rem;
+  margin: 0 0 .7rem; overflow-x: auto; white-space: pre;
+}
+.hall .snippet { background: #0B0E13; }
+.qprev .opts { display: grid; gap: .3rem; margin-top: .4rem; }
+.opt-row {
+  display: flex; align-items: flex-start; gap: .5rem;
+  padding: .35rem .5rem; border-radius: 6px; cursor: pointer; font-size: .87rem;
+  border: 1px solid transparent;
+}
+.opt-row:hover { background: var(--card); }
+.opt-row.correct { background: var(--pass-wash); border-color: var(--pass); color: var(--pass); font-weight: 600; }
+.opt-row input { width: auto; accent-color: var(--pass); margin-top: .18rem; }
+.qprev .why { font-size: .8rem; color: var(--ink-3); margin: .5rem 0 0; font-style: italic; }
+
+.blueprint { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .9rem; }
+
+/* ---------- the six-digit code ---------- */
+.entry-panel { border-left: 3px solid var(--blue); }
+.entry-code {
+  font-family: var(--mono); font-size: clamp(2.4rem, 8vw, 3.6rem);
+  letter-spacing: .3em; font-weight: 500; text-align: center;
+  padding: 1rem 0 1rem .3em; color: var(--blue-deep);
+  background: var(--blue-wash); border-radius: var(--radius); margin-bottom: 1rem;
+}
+.entry-code.expired { color: var(--ink-3); background: var(--card-2); text-decoration: line-through; }
+
+/* ---------- browser mode, in the paper ---------- */
+.attention {
+  font-family: var(--mono); font-size: .64rem; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--warn);
+  border: 1px solid var(--warn); border-radius: 6px; padding: .28rem .55rem;
+}
+.attention.hot { color: var(--seal); border-color: var(--seal); }
+
+@media (max-width: 950px) {
+  .mode-picker { grid-template-columns: 1fr; }
+  .mix-head { display: none; }
+  .mix-row { grid-template-columns: 1fr 1fr; }
+}
