@@ -8,7 +8,7 @@ const VISION_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
-const SAMPLE_MS = 500;   // two checks a second
+const SAMPLE_MS = 1500;   // two checks a second
 
 let detector = null, video = null, running = false;
 let state = "OK", stateSince = Date.now();
@@ -48,12 +48,21 @@ async function loop() {
     const now = classify(res.detections.length);
 
     if (now !== state) {
-      state = now;
-      stateSince = Date.now();
-      onState(state);
-    } else if (state !== "OK" && Date.now() - stateSince > FACE_GRACE_MS) {
-      await logIncident(state, `faces=${res.detections.length}`);
-      stateSince = Date.now();      // keep reporting while it persists
+  state = now;
+  stateSince = Date.now();
+
+  // Good detection can update immediately.
+  if (state === "OK") {
+    onState("OK");
+  }
+} else if (state !== "OK" && Date.now() - stateSince > FACE_GRACE_MS) {
+
+  // Show NO FACE / MULTIPLE FACES only when it has remained
+  // continuously wrong for the full grace period.
+  onState(state);
+
+  await logIncident(state, `faces=${res.detections.length}`);
+  stateSince = Date.now();    // keep reporting while it persists
     }
   } catch {
     /* the detector is still warming up — skip this frame */
