@@ -34,10 +34,19 @@ export const SEB_CONFIG_FILE = "pariksarakshak.seb";
 export const STRICT_SEB_VERIFY = true;
 
 // ---- Exam behaviour -----------------------------------------------------
-export const ALLOW_DEV_BYPASS = false;   // set FALSE before the first real exam
-export const PROCTOR_ENABLED = true;    // false = no camera at all
-export const LOCK_ON_FACE_LOSS = true;  // cover the paper when the face is gone
-export const FACE_LOCK_MS = 5000;       // how long before the paper is covered
-export const AUTOSAVE_DELAY_MS = 600;   // how long after typing stops answers save
-export const FACE_GRACE_MS = 4000;      // how long a face problem lasts before logging
-export const HEARTBEAT_MS = 30000;      // how often the exam page re-reads its attempt
+export const ALLOW_DEV_BYPASS = false;
+export const PROCTOR_ENABLED = true;
+
+// Camera still monitors and reports,
+// but it NEVER hides or blocks the exam paper.
+export const LOCK_ON_FACE_LOSS = false;
+
+// Kept at 30 sec in case blocking is ever enabled again.
+export const FACE_LOCK_MS = 30000;
+
+export const AUTOSAVE_DELAY_MS = 600;
+
+// Only record a face issue if it persists for 30 seconds.
+export const FACE_GRACE_MS = 30000;
+
+export const HEARTBEAT_MS = 30000;
