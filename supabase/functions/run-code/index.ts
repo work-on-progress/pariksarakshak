@@ -1,56 +1,34 @@
 // supabase/functions/run-code/index.ts
 //
-// PariksaRakshak code runner.
+// PariksaRakshak — reliable Python runner + proper diagnostics
 //
-// IMPORTANT 2026 change:
-// The old public Piston instance is no longer safely usable without an
-// authorization token. For Python papers we therefore use Wandbox first,
-// then fall back to Piston only when it is configured/reachable.
+// Behaviour:
+//   Run visible tests:
+//     - executes ONLY visible examples
+//     - returns Input / Expected / Your Output
+//     - returns the real Python compiler/runtime error when code fails
 //
-// Hidden tests are read with the service-role key and NEVER returned to the
-// student. Visible tests return input, expected output and the student's output.
+//   Submit for marks:
+//     - executes visible + hidden tests
+//     - hidden inputs/expected outputs NEVER leave this function
+//
+// Python execution uses Wandbox. The function discovers a current stable
+// CPython 3 compiler from Wandbox's /api/list.json instead of permanently
+// hard-coding a single "head" compiler.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const WANDBOX_BASE =
+  Deno.env.get("WANDBOX_BASE") ?? "https://wandbox.org/api";
+
 const PISTON_URL =
   Deno.env.get("PISTON_URL") ?? "https://emkc.org/api/v2/piston/execute";
-const PISTON_TOKEN = Deno.env.get("PISTON_TOKEN") ?? "";
 
-const WANDBOX_URL =
-  Deno.env.get("WANDBOX_URL") ?? "https://wandbox.org/api/compile.json";
+const PISTON_TOKEN =
+  Deno.env.get("PISTON_TOKEN") ?? "";
 
-const GAP_MS = Number(Deno.env.get("CODE_RUNNER_GAP_MS") ?? 250);
-
-const LANG_MAP: Record<
-  string,
-  { language: string; version: string; file: string }
-> = {
-  python: {
-    language: "python",
-    version: "3.10.0",
-    file: "main.py",
-  },
-  c: {
-    language: "c",
-    version: "10.2.0",
-    file: "main.c",
-  },
-  cpp: {
-    language: "c++",
-    version: "10.2.0",
-    file: "main.cpp",
-  },
-  java: {
-    language: "java",
-    version: "15.0.2",
-    file: "Main.java",
-  },
-  javascript: {
-    language: "javascript",
-    version: "18.15.0",
-    file: "main.js",
-  },
-};
+const GAP_MS =
+  Number(Deno.env.get("CODE_RUNNER_GAP_MS") ?? 220);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,6 +39,18 @@ const corsHeaders = {
 const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+type RunOutcome = {
+  stdout: string;
+  stderr: string;
+  serviceError: boolean;
+  exitCode: number;
+  runner: string;
+};
+
+let pythonCompilerCache:
+  | { name: string; expires: number }
+  | null = null;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -70,28 +60,21 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
 
     // ------------------------------------------------------------
-    // Setup-page health check.
+    // Setup check / liveness
     // ------------------------------------------------------------
     if (body.action === "ping") {
-      const [wandbox, piston] = await Promise.all([
-        pingUrl("https://wandbox.org/api/list.json"),
-        PISTON_TOKEN
-          ? pingUrl(PISTON_URL.replace("/execute", "/runtimes"), {
-              Authorization: PISTON_TOKEN,
-            })
-          : Promise.resolve("not configured"),
-      ]);
+      const compiler = await resolvePythonCompiler().catch(() => null);
 
       return json({
-        ok: true,
-        primary_python_runner: "wandbox",
-        wandbox,
-        piston,
-      });
+        ok: Boolean(compiler),
+        python_runner: "wandbox",
+        python_compiler: compiler ?? null,
+        piston_configured: Boolean(PISTON_TOKEN),
+      }, compiler ? 200 : 503);
     }
 
     // ------------------------------------------------------------
-    // Authentication.
+    // Authentication
     // ------------------------------------------------------------
     const authHeader = req.headers.get("Authorization") ?? "";
 
@@ -125,11 +108,7 @@ Deno.serve(async (req) => {
       mode = "run",
     } = body;
 
-    if (
-      !attempt_id ||
-      !question_id ||
-      typeof code !== "string"
-    ) {
+    if (!attempt_id || !question_id || typeof code !== "string") {
       return json(
         { error: "Missing attempt, question or code." },
         400,
@@ -141,14 +120,11 @@ Deno.serve(async (req) => {
     }
 
     if (code.length > 50_000) {
-      return json(
-        { error: "That submission is too long." },
-        400,
-      );
+      return json({ error: "That submission is too long." }, 400);
     }
 
     if (!["run", "submit"].includes(mode)) {
-      return json({ error: "Unknown code-run mode." }, 400);
+      return json({ error: "Unknown run mode." }, 400);
     }
 
     const admin = createClient(
@@ -157,7 +133,7 @@ Deno.serve(async (req) => {
     );
 
     // ------------------------------------------------------------
-    // Attempt + timing validation.
+    // Validate attempt + timing
     // ------------------------------------------------------------
     const { data: attempt } = await admin
       .from("attempts")
@@ -185,10 +161,13 @@ Deno.serve(async (req) => {
     const ex: any = attempt.exams;
 
     const now = Date.now();
+
     const personalEnd =
       new Date(attempt.started_at).getTime() +
-      (ex.duration_min + (attempt.extra_minutes ?? 0)) *
-        60_000;
+      (
+        ex.duration_min +
+        (attempt.extra_minutes ?? 0)
+      ) * 60_000;
 
     const hardEnd = Math.min(
       new Date(ex.ends_at).getTime(),
@@ -210,7 +189,7 @@ Deno.serve(async (req) => {
     }
 
     // ------------------------------------------------------------
-    // Coding question validation.
+    // Validate coding question
     // ------------------------------------------------------------
     const { data: q } = await admin
       .from("questions")
@@ -218,39 +197,23 @@ Deno.serve(async (req) => {
       .eq("id", question_id)
       .single();
 
-    if (
-      !q ||
-      q.exam_id !== attempt.exam_id ||
-      q.qtype !== "coding"
-    ) {
+    if (!q || q.exam_id !== attempt.exam_id || q.qtype !== "coding") {
       return json(
-        {
-          error:
-            "That is not a coding question on this paper.",
-        },
+        { error: "That is not a coding question on this paper." },
         400,
       );
     }
 
-    const language = q.language ?? "python";
-    const lang = LANG_MAP[language];
-
-    if (!lang) {
-      return json(
-        { error: `Language not supported: ${language}` },
-        400,
-      );
-    }
+    const language = String(q.language ?? "python").toLowerCase();
 
     // ------------------------------------------------------------
-    // Visible run = only examples.
-    // Submit = all visible + hidden.
+    // Read tests.
+    // run    -> visible only
+    // submit -> full set
     // ------------------------------------------------------------
     let query = admin
       .from("test_cases")
-      .select(
-        "id, stdin, expected_out, is_hidden, position",
-      )
+      .select("id, stdin, expected_out, is_hidden, position")
       .eq("question_id", question_id)
       .order("position");
 
@@ -278,8 +241,8 @@ Deno.serve(async (req) => {
         {
           error:
             mode === "run"
-              ? "This coding question has no visible example tests. Ask the teacher to regenerate or edit this coding question."
-              : "This coding question has no test cases. Ask the teacher to regenerate or edit this coding question.",
+              ? "This coding question has no visible example tests."
+              : "This coding question has no test cases.",
           missing_tests: true,
         },
         400,
@@ -287,58 +250,58 @@ Deno.serve(async (req) => {
     }
 
     // ------------------------------------------------------------
-    // Execute one test at a time.
+    // Execute
     // ------------------------------------------------------------
     const results: Array<Record<string, unknown>> = [];
 
     let passed = 0;
-    let visible = 0;
-    let hidden = 0;
+    let visibleNo = 0;
+    let hiddenNo = 0;
     let serviceFailures = 0;
 
-    for (const t of tests) {
-      const name = t.is_hidden
-        ? `Hidden test ${++hidden}`
-        : `Visible test ${++visible}`;
-
-      const outcome = await runOnce(
-        language,
-        lang,
-        code,
-        t.stdin,
-      );
+    for (const test of tests) {
+      const outcome =
+        await runProgram(
+          language,
+          code,
+          String(test.stdin ?? ""),
+        );
 
       if (outcome.serviceError) {
         serviceFailures++;
       }
 
-      const expected = normalizeOutput(t.expected_out);
-      const actual = normalizeOutput(outcome.stdout);
+      const expected =
+        normalizeOutput(test.expected_out);
+
+      const actual =
+        normalizeOutput(outcome.stdout);
 
       const pass =
         !outcome.serviceError &&
+        outcome.exitCode === 0 &&
         actual === expected;
 
-      if (pass) passed++;
+      if (pass) {
+        passed++;
+      }
 
-      if (t.is_hidden) {
+      if (test.is_hidden) {
         results.push({
-          name,
-          pass,
+          name: `Hidden test ${++hiddenNo}`,
           hidden: true,
-          ...(outcome.serviceError
-            ? { note: "could not run" }
-            : {}),
+          pass,
         });
       } else {
         results.push({
-          name,
-          pass,
+          name: `Visible test ${++visibleNo}`,
           hidden: false,
-          input: t.stdin,
+          pass,
+          input: String(test.stdin ?? ""),
           expected,
           got: actual,
           stderr: outcome.stderr,
+          exit_code: outcome.exitCode,
           runner: outcome.runner,
         });
       }
@@ -346,12 +309,13 @@ Deno.serve(async (req) => {
       await sleep(GAP_MS);
     }
 
-    // Every execution service failed: do NOT grade the student.
+    // If every provider call failed, this is infrastructure failure,
+    // not a wrong answer.
     if (serviceFailures === tests.length) {
       return json(
         {
           error:
-            "The code execution service did not respond. Your code was not judged and no marks were changed.",
+            "The code execution service could not be reached. Your code was not judged and your marks were not changed.",
           service_down: true,
         },
         503,
@@ -359,10 +323,11 @@ Deno.serve(async (req) => {
     }
 
     // ------------------------------------------------------------
-    // Only full submission writes marks.
+    // Full submission writes marks.
     // ------------------------------------------------------------
     if (mode === "submit") {
-      const allPassed = passed === tests.length;
+      const allPassed =
+        passed === tests.length;
 
       const { error: saveErr } = await admin
         .from("answers")
@@ -373,13 +338,16 @@ Deno.serve(async (req) => {
             code_submitted: code,
             passed_tests: passed,
             total_tests: tests.length,
-            auto_marks: allPassed
-              ? Number(q.marks)
-              : 0,
-            updated_at: new Date().toISOString(),
+            auto_marks:
+              allPassed
+                ? Number(q.marks)
+                : 0,
+            updated_at:
+              new Date().toISOString(),
           },
           {
-            onConflict: "attempt_id,question_id",
+            onConflict:
+              "attempt_id,question_id",
           },
         );
 
@@ -387,7 +355,7 @@ Deno.serve(async (req) => {
         return json(
           {
             error:
-              `Ran your code, but could not record it: ${saveErr.message}`,
+              `The tests ran, but the result could not be recorded: ${saveErr.message}`,
           },
           500,
         );
@@ -398,7 +366,8 @@ Deno.serve(async (req) => {
       mode,
       passed,
       total: tests.length,
-      all_passed: passed === tests.length,
+      all_passed:
+        passed === tests.length,
       results,
     });
   } catch (e) {
@@ -415,70 +384,181 @@ Deno.serve(async (req) => {
 });
 
 // ============================================================
-// Execution providers
+// Provider selection
 // ============================================================
 
-async function runOnce(
+async function runProgram(
   language: string,
-  lang: {
-    language: string;
-    version: string;
-    file: string;
-  },
   code: string,
   stdin: string,
-) {
-  // Python: use Wandbox first. It does not need the Piston token.
+): Promise<RunOutcome> {
   if (language === "python") {
-    const wandbox = await runWandboxPython(code, stdin);
-
-    if (!wandbox.serviceError) {
-      return wandbox;
-    }
-
-    // If a Piston token exists, keep it as a fallback.
-    if (PISTON_TOKEN) {
-      const piston = await runPiston(lang, code, stdin);
-      if (!piston.serviceError) return piston;
-    }
-
-    return wandbox;
+    return await runWandboxPython(code, stdin);
   }
 
-  // Other languages still use configured Piston.
-  if (!PISTON_TOKEN) {
-    return {
-      stdout: "",
-      stderr:
-        "No execution provider is configured for this language. Python works through Wandbox; other languages need a Piston token or self-hosted runner.",
-      serviceError: true,
-      runner: "none",
-    };
+  if (PISTON_TOKEN) {
+    return await runPiston(language, code, stdin);
   }
 
-  return runPiston(lang, code, stdin);
+  return {
+    stdout: "",
+    stderr:
+      "No execution provider is configured for this language. Python is available; other languages currently require the configured Piston service.",
+    serviceError: true,
+    exitCode: -1,
+    runner: "none",
+  };
+}
+
+// ============================================================
+// Wandbox Python
+// ============================================================
+
+async function resolvePythonCompiler(): Promise<string> {
+  const now = Date.now();
+
+  if (
+    pythonCompilerCache &&
+    pythonCompilerCache.expires > now
+  ) {
+    return pythonCompilerCache.name;
+  }
+
+  const res = await fetch(
+    `${WANDBOX_BASE}/list.json`,
+    {
+      signal:
+        AbortSignal.timeout(8000),
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      `Wandbox compiler list returned HTTP ${res.status}`,
+    );
+  }
+
+  const list = await res.json();
+
+  if (!Array.isArray(list)) {
+    throw new Error(
+      "Wandbox compiler list was not an array.",
+    );
+  }
+
+  const candidates =
+    list
+      .filter((c: any) => {
+        const language =
+          String(c?.language ?? "");
+
+        const version =
+          String(c?.version ?? "");
+
+        const name =
+          String(c?.name ?? "");
+
+        return (
+          language === "Python" &&
+          /python-3\./i.test(version) &&
+          /cpython/i.test(name)
+        );
+      })
+      .map((c: any) => ({
+        name:
+          String(c.name),
+        version:
+          String(c.version),
+      }));
+
+  if (!candidates.length) {
+    throw new Error(
+      "No CPython 3 compiler is currently listed by Wandbox.",
+    );
+  }
+
+  // Prefer a stable compiler over a moving "head" build.
+  const stable =
+    candidates.filter(
+      (c) =>
+        !/head/i.test(c.name),
+    );
+
+  const pool =
+    stable.length
+      ? stable
+      : candidates;
+
+  pool.sort(
+    (a, b) =>
+      compareVersion(
+        b.version,
+        a.version,
+      ),
+  );
+
+  const chosen =
+    pool[0].name;
+
+  pythonCompilerCache = {
+    name: chosen,
+    expires:
+      now + 15 * 60_000,
+  };
+
+  return chosen;
 }
 
 async function runWandboxPython(
   code: string,
   stdin: string,
-) {
-  for (let n = 0; n < 2; n++) {
+): Promise<RunOutcome> {
+  let compiler: string;
+
+  try {
+    compiler =
+      await resolvePythonCompiler();
+  } catch (e) {
+    return {
+      stdout: "",
+      stderr: String(e),
+      serviceError: true,
+      exitCode: -1,
+      runner: "wandbox",
+    };
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(WANDBOX_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
+      const res = await fetch(
+        `${WANDBOX_BASE}/compile.json`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+            Accept:
+              "application/json",
+          },
+
+          body:
+            JSON.stringify({
+              compiler,
+              code,
+              stdin,
+              save: false,
+            }),
+
+          signal:
+            AbortSignal.timeout(
+              25_000,
+            ),
         },
-        body: JSON.stringify({
-          compiler: "cpython-head",
-          code,
-          stdin,
-          save: false,
-        }),
-        signal: AbortSignal.timeout(20_000),
-      });
+      );
 
       if (res.status === 429) {
         await sleep(1000);
@@ -487,58 +567,110 @@ async function runWandboxPython(
 
       if (!res.ok) {
         const detail =
-          (await res.text()).slice(0, 300);
+          (await res.text())
+            .slice(0, 500);
 
         return {
           stdout: "",
           stderr:
             `Wandbox HTTP ${res.status}: ${detail}`,
           serviceError: true,
-          runner: "wandbox",
+          exitCode: -1,
+          runner:
+            `wandbox:${compiler}`,
         };
       }
 
-      const data = await res.json();
+      const data =
+        await res.json();
 
-      const status = String(data.status ?? "");
-      const stdout = String(
-        data.program_output ??
-          data.program_message ??
-          "",
-      );
+      const exitCode =
+        Number(
+          data.status ?? -1,
+        );
 
-      const stderr = String(
-        data.compiler_error ??
-          data.compiler_message ??
-          "",
-      ).slice(0, 1200);
+      // Wandbox provides runtime and compiler errors separately.
+      // The previous implementation ignored program_error, which is
+      // why the UI only showed "Program exited with status 1."
+      const stdout =
+        String(
+          data.program_output ??
+            "",
+        );
 
-      // Wandbox status "0" means program completed normally.
-      if (status && status !== "0") {
-        return {
-          stdout,
-          stderr:
-            stderr ||
-            `Program exited with status ${status}.`,
-          serviceError: false,
-          runner: "wandbox",
-        };
+      const stderrParts = [
+        data.compiler_error,
+        data.program_error,
+      ]
+        .map((v) =>
+          String(v ?? "").trim(),
+        )
+        .filter(Boolean);
+
+      let stderr =
+        stderrParts.join("\n");
+
+      // Some Wandbox responses only populate the merged message field.
+      if (
+        exitCode !== 0 &&
+        !stderr
+      ) {
+        const merged =
+          String(
+            data.program_message ??
+              data.compiler_message ??
+              "",
+          ).trim();
+
+        if (
+          merged &&
+          normalizeOutput(merged) !==
+            normalizeOutput(stdout)
+        ) {
+          stderr = merged;
+        }
+      }
+
+      // If Wandbox gives a non-zero status with absolutely no diagnostic,
+      // invalidate the compiler cache once and retry using a newly-resolved
+      // stable compiler.
+      if (
+        exitCode !== 0 &&
+        !stdout &&
+        !stderr &&
+        attempt === 0
+      ) {
+        pythonCompilerCache = null;
+
+        try {
+          compiler =
+            await resolvePythonCompiler();
+        } catch {
+          // keep current compiler and allow the next loop to return
+        }
+
+        await sleep(500);
+        continue;
       }
 
       return {
         stdout,
         stderr,
         serviceError: false,
-        runner: "wandbox",
+        exitCode,
+        runner:
+          `wandbox:${compiler}`,
       };
     } catch (e) {
-      if (n === 1) {
+      if (attempt === 1) {
         return {
           stdout: "",
           stderr:
             `Could not reach Wandbox (${e})`,
           serviceError: true,
-          runner: "wandbox",
+          exitCode: -1,
+          runner:
+            `wandbox:${compiler}`,
         };
       }
 
@@ -548,137 +680,224 @@ async function runWandboxPython(
 
   return {
     stdout: "",
-    stderr: "Could not reach Wandbox.",
+    stderr:
+      "Wandbox did not return a usable result.",
     serviceError: true,
-    runner: "wandbox",
+    exitCode: -1,
+    runner:
+      `wandbox:${compiler}`,
   };
 }
+
+// ============================================================
+// Optional Piston for non-Python languages
+// ============================================================
 
 async function runPiston(
-  lang: {
-    language: string;
-    version: string;
-    file: string;
-  },
+  language: string,
   code: string,
   stdin: string,
-) {
-  for (let n = 0; n < 2; n++) {
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-
-      if (PISTON_TOKEN) {
-        headers.Authorization = PISTON_TOKEN;
+): Promise<RunOutcome> {
+  const langMap:
+    Record<
+      string,
+      {
+        language: string;
+        version: string;
+        file: string;
       }
+    > = {
+      c: {
+        language: "c",
+        version: "10.2.0",
+        file: "main.c",
+      },
 
-      const res = await fetch(PISTON_URL, {
+      cpp: {
+        language: "c++",
+        version: "10.2.0",
+        file: "main.cpp",
+      },
+
+      java: {
+        language: "java",
+        version: "15.0.2",
+        file: "Main.java",
+      },
+
+      javascript: {
+        language:
+          "javascript",
+        version:
+          "18.15.0",
+        file:
+          "main.js",
+      },
+    };
+
+  const lang =
+    langMap[language];
+
+  if (!lang) {
+    return {
+      stdout: "",
+      stderr:
+        `Language not supported: ${language}`,
+      serviceError: true,
+      exitCode: -1,
+      runner: "piston",
+    };
+  }
+
+  try {
+    const res = await fetch(
+      PISTON_URL,
+      {
         method: "POST",
-        headers,
-        body: JSON.stringify({
-          language: lang.language,
-          version: lang.version,
-          files: [
-            {
-              name: lang.file,
-              content: code,
-            },
-          ],
-          stdin,
-          run_timeout: 5000,
-          compile_timeout: 10000,
-        }),
-        signal: AbortSignal.timeout(25_000),
-      });
 
-      if (res.status === 429) {
-        await sleep(1200);
-        continue;
-      }
+        headers: {
+          "Content-Type":
+            "application/json",
+          Authorization:
+            PISTON_TOKEN,
+        },
 
-      if (!res.ok) {
-        const detail =
-          (await res.text()).slice(0, 300);
+        body:
+          JSON.stringify({
+            language:
+              lang.language,
+            version:
+              lang.version,
+            files: [
+              {
+                name:
+                  lang.file,
+                content:
+                  code,
+              },
+            ],
+            stdin,
+            run_timeout:
+              5000,
+            compile_timeout:
+              10000,
+          }),
 
-        return {
-          stdout: "",
-          stderr:
-            `Piston HTTP ${res.status}: ${detail}`,
-          serviceError: true,
-          runner: "piston",
-        };
-      }
+        signal:
+          AbortSignal.timeout(
+            25_000,
+          ),
+      },
+    );
 
-      const data = await res.json();
-
-      if (data.message) {
-        return {
-          stdout: "",
-          stderr:
-            `Piston: ${String(data.message).slice(0, 300)}`,
-          serviceError: true,
-          runner: "piston",
-        };
-      }
-
+    if (!res.ok) {
       return {
-        stdout:
-          data.run?.stdout ?? "",
+        stdout: "",
         stderr:
-          (
-            data.compile?.stderr ||
-            data.run?.stderr ||
-            ""
-          ).slice(0, 1200),
-        serviceError: false,
+          `Piston HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`,
+        serviceError: true,
+        exitCode: -1,
         runner: "piston",
       };
-    } catch (e) {
-      if (n === 1) {
-        return {
-          stdout: "",
-          stderr:
-            `Could not reach Piston (${e})`,
-          serviceError: true,
-          runner: "piston",
-        };
-      }
-
-      await sleep(800);
     }
-  }
 
-  return {
-    stdout: "",
-    stderr: "Could not reach Piston.",
-    serviceError: true,
-    runner: "piston",
-  };
-}
+    const data =
+      await res.json();
 
-async function pingUrl(
-  url: string,
-  headers: Record<string, string> = {},
-) {
-  try {
-    const res = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(6000),
-    });
+    const exitCode =
+      Number(
+        data.run?.code ??
+          data.compile?.code ??
+          0,
+      );
 
-    return res.ok
-      ? "reachable"
-      : `http ${res.status}`;
+    return {
+      stdout:
+        String(
+          data.run?.stdout ??
+            "",
+        ),
+
+      stderr:
+        String(
+          data.compile?.stderr ||
+            data.run?.stderr ||
+            "",
+        ).slice(0, 1500),
+
+      serviceError: false,
+      exitCode,
+      runner: "piston",
+    };
   } catch (e) {
-    return `unreachable (${e})`;
+    return {
+      stdout: "",
+      stderr:
+        `Could not reach Piston (${e})`,
+      serviceError: true,
+      exitCode: -1,
+      runner: "piston",
+    };
   }
 }
 
-function normalizeOutput(value: unknown) {
+// ============================================================
+// Helpers
+// ============================================================
+
+function normalizeOutput(
+  value: unknown,
+) {
   return String(value ?? "")
     .replace(/\r\n/g, "\n")
     .trimEnd();
+}
+
+function compareVersion(
+  a: string,
+  b: string,
+) {
+  const pa =
+    (
+      a.match(
+        /\d+(?:\.\d+)+/,
+      )?.[0] ??
+      "0"
+    )
+      .split(".")
+      .map(Number);
+
+  const pb =
+    (
+      b.match(
+        /\d+(?:\.\d+)+/,
+      )?.[0] ??
+      "0"
+    )
+      .split(".")
+      .map(Number);
+
+  const n =
+    Math.max(
+      pa.length,
+      pb.length,
+    );
+
+  for (
+    let i = 0;
+    i < n;
+    i++
+  ) {
+    const diff =
+      (pa[i] ?? 0) -
+      (pb[i] ?? 0);
+
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+
+  return 0;
 }
 
 function json(
@@ -689,10 +908,15 @@ function json(
     JSON.stringify(body),
     {
       status,
+
       headers: {
         ...corsHeaders,
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
+
+        "Content-Type":
+          "application/json",
+
+        "Cache-Control":
+          "no-store",
       },
     },
   );
