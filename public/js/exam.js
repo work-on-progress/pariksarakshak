@@ -214,7 +214,12 @@ async function openPaper(resuming) {
     autoSubmitAfter: runningMode === "browser" ? (BROWSER_MODE.autoSubmitAfterSwitches || 0) : 0,
     onSwitch: showAttention,
     onAutoSubmit: (n) => {
-      alert(`This paper was set to submit automatically after ${n} switches away.`);
+      const el = document.getElementById("attention");
+      if (el) {
+        el.classList.remove("hidden");
+        el.className = "attention hot";
+        el.textContent = `${n} switches away · limit reached · submitting`;
+      }
       finish(true);
     },
   });
@@ -540,16 +545,60 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
     return;
   }
 
-  const lines = res.results.map((r) => {
-    const mark = r.pass ? "PASS" : "FAIL";
-    if (r.hidden) return `[${mark}] ${r.name}${r.note ? ` — ${r.note}` : ""}`;
-    let block = `[${mark}] ${r.name}\n      your output: ${r.got || "(nothing)"}\n      expected:    ${r.expected}`;
-    if (r.stderr) block += `\n      error: ${r.stderr}`;
-    return block;
-  });
+  const visible = res.results.filter((r) => !r.hidden);
+  const hidden = res.results.filter((r) => r.hidden);
 
-  verdict.textContent =
-    `${res.passed} of ${res.total} tests passed${res.all_passed ? "  ✓" : ""}\n\n${lines.join("\n")}`;
+  verdict.innerHTML = "";
+
+  const summary = document.createElement("div");
+  summary.className = "test-summary";
+  summary.textContent = `${res.passed} of ${res.total} tests passed${res.all_passed ? " ✓" : ""}`;
+  verdict.appendChild(summary);
+
+  if (visible.length) {
+    const grid = document.createElement("div");
+    grid.className = "test-results-grid";
+
+    visible.forEach((r) => {
+      const card = document.createElement("div");
+      card.className = `test-result-card ${r.pass ? "pass" : "fail"}`;
+
+      const head = document.createElement("div");
+      head.className = "test-result-head";
+      head.textContent = `${r.pass ? "PASS" : "FAIL"} · ${r.name}`;
+      card.appendChild(head);
+
+      const row = document.createElement("div");
+      row.className = "test-compare";
+      row.innerHTML = `
+        <div><span>INPUT</span><pre></pre></div>
+        <div><span>EXPECTED OUTPUT</span><pre></pre></div>
+        <div><span>YOUR OUTPUT</span><pre></pre></div>`;
+      const pres = row.querySelectorAll("pre");
+      pres[0].textContent = r.input || "(no input)";
+      pres[1].textContent = r.expected || "(nothing)";
+      pres[2].textContent = r.got || "(nothing)";
+      card.appendChild(row);
+
+      if (r.stderr) {
+        const err = document.createElement("pre");
+        err.className = "test-error";
+        err.textContent = `Error: ${r.stderr}`;
+        card.appendChild(err);
+      }
+      grid.appendChild(card);
+    });
+    verdict.appendChild(grid);
+  }
+
+  if (hidden.length) {
+    const hiddenLine = document.createElement("div");
+    hiddenLine.className = "hidden-test-summary";
+    hiddenLine.textContent = hidden.map((r) =>
+      `${r.pass ? "PASS" : "FAIL"} · ${r.name}${r.note ? ` — ${r.note}` : ""}`
+    ).join("  |  ");
+    verdict.appendChild(hiddenLine);
+  }
 
   if (mode === "submit") {
     stateEl.dataset.ok = res.all_passed ? "1" : "0";

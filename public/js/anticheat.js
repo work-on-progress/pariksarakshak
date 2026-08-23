@@ -166,25 +166,48 @@ let switchCount = 0;
 export const attentionCount = () => switchCount;
 
 export function activateFocusMonitor({ onSwitch = null, warnAfter = 3, autoSubmitAfter = 0, onAutoSubmit = null } = {}) {
-  let last = 0;
+  // blur + visibilitychange usually fire for the same Alt+Tab. `away` makes
+  // that one switch, not two incidents/counters.
+  let away = false;
+  let autoSubmitted = false;
 
-  const record = (type, detail) => {
-    const now = Date.now();
-    if (now - last < 1500) return;      // one event per one and a half seconds
-    last = now;
+  const recordSwitch = (type) => {
+    if (away || autoSubmitted) return;
+    away = true;
     switchCount++;
-    logIncident(type, detail);
+
+    const hitLimit = autoSubmitAfter > 0 && switchCount >= autoSubmitAfter;
+    logIncident(
+      type,
+      `switch_count=${switchCount}${hitLimit ? "; auto_submit=true" : ""}`,
+    );
     onSwitch?.(switchCount, warnAfter);
-    if (autoSubmitAfter > 0 && switchCount >= autoSubmitAfter) onAutoSubmit?.(switchCount);
+
+    if (hitLimit) {
+      autoSubmitted = true;
+      onAutoSubmit?.(switchCount);
+    }
   };
 
-  window.addEventListener("blur", () => record("WINDOW_BLUR"));
+  const returned = () => {
+    if (!document.hidden) away = false;
+  };
+
+  window.addEventListener("blur", () => recordSwitch("WINDOW_BLUR"));
+  window.addEventListener("focus", returned);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) record("TAB_HIDDEN");
+    if (document.hidden) recordSwitch("TAB_HIDDEN");
+    else returned();
   });
+
+  // Fullscreen loss is still recorded, but it does not add a second tab-switch
+  // count. The fullscreen cover handles bringing the student back.
   document.addEventListener("fullscreenchange", () => {
-    if (!document.fullscreenElement) record("FULLSCREEN_EXIT");
+    if (!document.fullscreenElement) {
+      logIncident("FULLSCREEN_EXIT", `switch_count=${switchCount}`);
+    }
   });
+
   window.addEventListener("beforeunload", (e) => {
     e.preventDefault();
     e.returnValue = "";

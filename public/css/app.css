@@ -378,3 +378,49 @@ table.results input { width: 70px; font-family: var(--mono); padding: .25rem .4r
   .mix-head { display: none; }
   .mix-row { grid-template-columns: 1fr 1fr; }
 }
+
+
+/* ---------- VISIBLE CODE TEST COMPARISON ---------- */
+.verdict:has(.test-results-grid) { max-height: 520px; white-space: normal; }
+.test-summary { font-weight: 700; margin-bottom: .75rem; }
+.test-results-grid { display: grid; gap: .75rem; }
+.test-result-card {
+  border: 1px solid var(--rule); border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm); overflow: hidden; background: var(--card);
+}
+.test-result-card.pass { border-left-color: var(--pass); }
+.test-result-card.fail { border-left-color: var(--seal); }
+.test-result-head {
+  padding: .55rem .7rem; border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--mono); font-size: .72rem; font-weight: 700;
+}
+.test-compare { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.test-compare > div { min-width: 0; padding: .65rem; border-right: 1px solid var(--rule-soft); }
+.test-compare > div:last-child { border-right: 0; }
+.test-compare span {
+  display: block; margin-bottom: .35rem; color: var(--ink-3);
+  font-family: var(--mono); font-size: .58rem; letter-spacing: .1em;
+}
+.test-compare pre, .test-error {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: var(--mono); font-size: .75rem;
+}
+.test-error { padding: .55rem .7rem; color: var(--seal); border-top: 1px solid var(--rule-soft); }
+.hidden-test-summary { margin-top: .7rem; color: var(--ink-3); font-size: .7rem; }
+
+/* ---------- INCIDENT / FLAG INSPECTOR ---------- */
+.flags-dialog {
+  width: min(1000px, calc(100vw - 2rem)); max-height: 82vh; padding: 0;
+  border: 0; border-radius: var(--radius); background: transparent;
+}
+.flags-dialog::backdrop { background: rgba(10, 14, 18, .58); }
+.flags-dialog-panel { max-height: 82vh; }
+.flags-dialog-panel .panel-body { max-height: 68vh; overflow: auto; }
+.incident-table code { font-size: .68rem; }
+.btn.hot { color: var(--seal); border-color: color-mix(in srgb, var(--seal) 45%, var(--rule)); }
+
+@media (max-width: 760px) {
+  .test-compare { grid-template-columns: 1fr; }
+  .test-compare > div { border-right: 0; border-bottom: 1px solid var(--rule-soft); }
+  .test-compare > div:last-child { border-bottom: 0; }
+}

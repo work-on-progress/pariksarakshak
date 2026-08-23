@@ -141,6 +141,7 @@ Deno.serve(async (req) => {
           ? { name, pass, hidden: true, ...(outcome.serviceError ? { note: "could not run" } : {}) }
           : {
               name, pass, hidden: false,
+              input: t.stdin,
               got: outcome.stdout, expected,
               stderr: outcome.stderr,
             },

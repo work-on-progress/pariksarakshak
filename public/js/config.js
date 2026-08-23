@@ -17,38 +17,19 @@ export const INSTITUTE_NAME = "";
 export const SUPPORT_NOTE = "Ask your invigilator if anything on this page does not work.";
 
 // ---- Student accounts ---------------------------------------------------
-// Bulk-created accounts get the address  <rollno>@<STUDENT_EMAIL_DOMAIN>.
-// It never needs to receive mail, so a fake domain is fine and deliberate.
 export const STUDENT_EMAIL_DOMAIN = "exam.local";
 
 // ---- Safe Exam Browser launch -------------------------------------------
-// The student portal builds  sebs://your-site/seb/<SEB_CONFIG_FILE>?launch=…
-// so this must match the file you save into public/seb/.
 export const SEB_CONFIG_FILE = "pariksarakshak.seb";
-
-// true  → the exam page asks the server to verify SEB's Config Key, so a copied
-//         or edited .seb file is rejected. This is the setting you want.
-// false → falls back to checking only that SEB is present, which a determined
-//         student can fake. Use it only until you have set the SEB_CONFIG_KEY
-//         secret; the setup page keeps warning while it is off.
 export const STRICT_SEB_VERIFY = true;
 
 // ---- Exam behaviour -----------------------------------------------------
 export const ALLOW_DEV_BYPASS = false;
 export const PROCTOR_ENABLED = true;
-
-// Camera still monitors and reports,
-// but it NEVER hides or blocks the exam paper.
 export const LOCK_ON_FACE_LOSS = false;
-
-// Kept at 30 sec in case blocking is ever enabled again.
 export const FACE_LOCK_MS = 30000;
-
 export const AUTOSAVE_DELAY_MS = 600;
-
-// Only record a face issue if it persists for 30 seconds.
 export const FACE_GRACE_MS = 30000;
-
 export const HEARTBEAT_MS = 30000;
 
 // ---- Browser-delivered papers -------------------------------------------
@@ -59,15 +40,11 @@ export const BROWSER_MODE = {
   blockPrint: true,
   warnOnTabSwitch: true,
   singleSession: true,
-  autoSubmitAfterSwitches: 0,
+  // Exactly three genuine switches away end an ordinary-browser attempt.
+  autoSubmitAfterSwitches: 3,
 };
 
 // ---- Document import ----------------------------------------------------
-export const PDFJS_URL =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-
-export const PDFJS_WORKER =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-export const MAMMOTH_URL =
-  "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+export const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+export const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+export const MAMMOTH_URL = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";

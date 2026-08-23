@@ -173,7 +173,7 @@ async function loadExams() {
     b.onclick = async () => {
       const e = exams.find((x) => x.id === b.dataset.del);
       if (!confirm(`Delete ${e.exam_code} with all questions, attempts, answers and incidents? This cannot be undone.`)) return;
-      const { error } = await supabase.from("exams").delete().eq("id", e.id);
+      const { error } = await supabase.rpc("delete_exam_cascade", { p_exam_id: e.id });
       if (error) return alert(error.message);
       if (editingExamId === e.id) resetExamForm();
       loadExams();
@@ -560,6 +560,26 @@ function renderDraft() {
   });
 }
 
+function normaliseGeneratedTests(testCases) {
+  const tests = Array.isArray(testCases)
+    ? testCases
+      .filter((t) => t && String(t.expected_out ?? "") !== "")
+      .map((t, i) => ({
+        stdin: String(t.stdin ?? ""),
+        expected_out: String(t.expected_out ?? ""),
+        is_hidden: t.is_hidden !== false,
+        position: i + 1,
+      }))
+    : [];
+
+  // A generated coding question must have examples. If Gemini marked every
+  // case hidden, expose the first two so Run visible tests is useful.
+  if (tests.length && !tests.some((t) => !t.is_hidden)) {
+    tests.slice(0, Math.min(2, tests.length)).forEach((t) => { t.is_hidden = false; });
+  }
+  return tests;
+}
+
 async function saveDraft() {
   const exam_id = val("examSelect");
   if (!exam_id || !draft?.length) return;
@@ -568,6 +588,14 @@ async function saveDraft() {
   if (missing.length) {
     return note("genMsg",
       `${missing.length} multiple-choice question${missing.length === 1 ? " has" : "s have"} no answer marked. Click the correct option on each before saving.`,
+      "error");
+  }
+
+  const brokenCoding = draft.find((q) =>
+    q.qtype === "coding" && normaliseGeneratedTests(q.test_cases).length < 2);
+  if (brokenCoding) {
+    return note("genMsg",
+      "A coding question came back without enough test cases. Remove/regenerate that coding question, or add its tests by hand before saving.",
       "error");
   }
 
@@ -602,11 +630,19 @@ async function saveDraft() {
         "error");
     }
 
-    if (q.qtype === "coding" && q.test_cases?.length) {
-      await supabase.from("test_cases").insert(q.test_cases.map((t, i) => ({
-        question_id: row.id, stdin: t.stdin ?? "", expected_out: t.expected_out ?? "",
-        is_hidden: t.is_hidden !== false, position: i + 1,
-      })));
+    if (q.qtype === "coding") {
+      const tests = normaliseGeneratedTests(q.test_cases);
+      const { error: testError } = await supabase.from("test_cases").insert(
+        tests.map((t) => ({ ...t, question_id: row.id })),
+      );
+      if (testError) {
+        // Do not leave a coding question in the paper with zero runnable tests.
+        await supabase.from("questions").delete().eq("id", row.id);
+        btn.disabled = false; btn.textContent = "Save to paper";
+        return note("genMsg",
+          `Stopped after ${saved} questions: coding test cases could not be saved — ${escapeHtml(testError.message)}`,
+          "error");
+      }
     }
     saved++;
   }
@@ -730,8 +766,11 @@ async function saveManual() {
     const { error } = await supabase.from("questions").update(row).eq("id", editingQuestionId);
     if (error) return note("mMsg", escapeHtml(error.message), "error");
     if (qtype === "coding") {
-      await supabase.from("test_cases").delete().eq("question_id", editingQuestionId);
-      await supabase.from("test_cases").insert(tests.map((t) => ({ ...t, question_id: editingQuestionId })));
+      const { error: delTestError } = await supabase.from("test_cases").delete().eq("question_id", editingQuestionId);
+      if (delTestError) return note("mMsg", `Could not replace test cases: ${escapeHtml(delTestError.message)}`, "error");
+      const { error: addTestError } = await supabase.from("test_cases")
+        .insert(tests.map((t) => ({ ...t, question_id: editingQuestionId })));
+      if (addTestError) return note("mMsg", `Could not save test cases: ${escapeHtml(addTestError.message)}`, "error");
     }
     note("mMsg", "Question updated.", "ok");
   } else {
@@ -739,7 +778,12 @@ async function saveManual() {
     const { data, error } = await supabase.from("questions").insert(row).select("id").single();
     if (error) return note("mMsg", escapeHtml(error.message), "error");
     if (qtype === "coding") {
-      await supabase.from("test_cases").insert(tests.map((t) => ({ ...t, question_id: data.id })));
+      const { error: addTestError } = await supabase.from("test_cases")
+        .insert(tests.map((t) => ({ ...t, question_id: data.id })));
+      if (addTestError) {
+        await supabase.from("questions").delete().eq("id", data.id);
+        return note("mMsg", `Could not save test cases: ${escapeHtml(addTestError.message)}`, "error");
+      }
     }
     note("mMsg", "Question added to the paper.", "ok");
   }
@@ -771,10 +815,33 @@ async function loadQuestions() {
     return;
   }
 
-  const { data: qs } = await supabase.from("questions")
-    .select("*, test_cases(count)").eq("exam_id", exam_id).order("position");
+  // Read questions separately from test cases. A failed nested test_cases join
+  // used to make a real paper look EMPTY in the console.
+  const { data: qs, error: qError } = await supabase.from("questions")
+    .select("*").eq("exam_id", exam_id).order("position");
 
-  const total = (qs ?? []).reduce((s, q) => s + Number(q.marks), 0);
+  if (qError) {
+    document.getElementById("qCount").textContent = "could not read";
+    blueprint.innerHTML = "";
+    box.innerHTML = `<p class="notice error">Could not read this paper: ${escapeHtml(qError.message)}</p>`;
+    return;
+  }
+
+  const codingIds = (qs ?? []).filter((q) => q.qtype === "coding").map((q) => q.id);
+  const testMap = {};
+  if (codingIds.length) {
+    const { data: tests, error: tError } = await supabase.from("test_cases")
+      .select("question_id, is_hidden").in("question_id", codingIds);
+    if (!tError) {
+      (tests ?? []).forEach((t) => {
+        testMap[t.question_id] ??= { total: 0, visible: 0 };
+        testMap[t.question_id].total++;
+        if (!t.is_hidden) testMap[t.question_id].visible++;
+      });
+    }
+  }
+
+  const total = (qs ?? []).reduce((sum, q) => sum + Number(q.marks), 0);
   document.getElementById("qCount").textContent =
     qs?.length ? `${qs.length} questions · ${total} marks` : "empty";
 
@@ -789,28 +856,33 @@ async function loadQuestions() {
   blueprint.innerHTML = ["easy", "medium", "hard"].map((d) =>
     `<span class="tag diff-${d}">${counts[d]} ${d}</span>`).join(" ");
 
-  box.innerHTML = qs.map((q, i) => `
-    <div class="list-row">
-      <span class="tag ${{ mcq: "blue", cloze: "warn", long: "", coding: "pass" }[q.qtype]}">${q.qtype}</span>
-      <span>
-        <span class="title">Q${i + 1}. ${escapeHtml(q.prompt.slice(0, 80))}${q.prompt.length > 80 ? "…" : ""}</span><br>
-        <span class="when">${q.difficulty ?? "medium"} · ${q.marks} marks${
-          q.qtype === "mcq" && q.mcq_kind !== "theory" ? ` · ${KIND_LABEL[q.mcq_kind] ?? q.mcq_kind}` : ""}${
-          q.qtype === "coding" ? ` · ${q.test_cases?.[0]?.count ?? 0} tests` : ""}</span>
-      </span>
-      <span class="tools" style="margin-left:auto;display:flex;gap:.3rem">
-        <button class="btn ghost tiny" data-edit="${q.id}">Edit</button>
-        <button class="btn ghost tiny" data-qdel="${q.id}">Delete</button>
-      </span>
-    </div>`).join("");
+  box.innerHTML = qs.map((q, i) => {
+    const tc = testMap[q.id] ?? { total: 0, visible: 0 };
+    const codingMeta = q.qtype === "coding"
+      ? ` · ${tc.total} tests · ${tc.visible} visible${tc.visible === 0 ? " ⚠" : ""}` : "";
+    return `
+      <div class="list-row">
+        <span class="tag ${{ mcq: "blue", cloze: "warn", long: "", coding: "pass" }[q.qtype]}">${q.qtype}</span>
+        <span>
+          <span class="title">Q${i + 1}. ${escapeHtml(q.prompt.slice(0, 80))}${q.prompt.length > 80 ? "…" : ""}</span><br>
+          <span class="when">${q.difficulty ?? "medium"} · ${q.marks} marks${
+            q.qtype === "mcq" && q.mcq_kind !== "theory" ? ` · ${KIND_LABEL[q.mcq_kind] ?? q.mcq_kind}` : ""}${codingMeta}</span>
+        </span>
+        <span class="tools" style="margin-left:auto;display:flex;gap:.3rem">
+          <button class="btn ghost tiny" data-edit="${q.id}">Edit</button>
+          <button class="btn ghost tiny" data-qdel="${q.id}">Delete</button>
+        </span>
+      </div>`;
+  }).join("");
 
   box.querySelectorAll("[data-edit]").forEach((b) => {
     b.onclick = () => editQuestion(qs.find((q) => q.id === b.dataset.edit));
   });
   box.querySelectorAll("[data-qdel]").forEach((b) => {
     b.onclick = async () => {
-      if (!confirm("Delete this question?")) return;
-      await supabase.from("questions").delete().eq("id", b.dataset.qdel);
+      if (!confirm("Delete this question and any answers/test cases attached to it?")) return;
+      const { error } = await supabase.from("questions").delete().eq("id", b.dataset.qdel);
+      if (error) return alert(error.message);
       loadQuestions();
     };
   });
@@ -1023,7 +1095,8 @@ async function loadRoom() {
 
   const [{ data: attempts }, { data: incidents }, { data: students }] = await Promise.all([
     supabase.from("attempts").select("*").eq("exam_id", exam_id),
-    supabase.from("incident_logs").select("student_id, event_type").eq("exam_id", exam_id),
+    supabase.from("incident_logs")
+      .select("id, student_id, event_type, detail, created_at").eq("exam_id", exam_id),
     supabase.from("profiles").select("id, full_name, roll_no").eq("role", "student"),
   ]);
 
@@ -1031,7 +1104,7 @@ async function loadRoom() {
 
   const flags = {};
   (incidents ?? []).forEach((i) => {
-    flags[i.student_id] = (flags[i.student_id] ?? 0) + (SEVERITY[i.event_type] === "low" ? 0 : 1);
+    flags[i.student_id] = (flags[i.student_id] ?? 0) + 1;
   });
 
   const sitting = (attempts ?? []).filter((a) => a.status === "in_progress").length;
@@ -1055,7 +1128,10 @@ async function loadRoom() {
       <span class="roll">${escapeHtml(who.roll_no ?? "—")}</span>
       <span>${escapeHtml(who.full_name ?? "Unknown")}</span>
       <span class="tag ${a.status === "submitted" ? "pass" : ""}">${a.status.replace("_", " ")}</span>
-      <span class="flags ${f > 2 ? "hot" : ""}">${f ? `${f} flags` : ""}</span>
+      <button class="btn ghost tiny ${f > 2 ? "hot" : ""}" data-view-flags="${a.student_id}"
+              data-student-label="${escapeHtml(who.full_name || who.roll_no || "student")}">
+        ${f} event${f === 1 ? "" : "s"} · view flags
+      </button>
       <span class="tools">
         <button class="btn ghost tiny" data-extra="${a.id}">+5 min</button>
         ${a.status !== "in_progress" ? `<button class="btn ghost tiny" data-unlock="${a.id}">Unlock</button>` : ""}
@@ -1085,6 +1161,38 @@ async function loadRoom() {
       await resetAttempt(exam_id, b.dataset.resetAttempt, b.dataset.studentLabel);
     };
   });
+  box.querySelectorAll("[data-view-flags]").forEach((b) => {
+    b.onclick = () => viewStudentFlags(exam_id, b.dataset.viewFlags, b.dataset.studentLabel);
+  });
+}
+
+async function viewStudentFlags(examId, studentId, label = "student") {
+  const { data, error } = await supabase.from("incident_logs")
+    .select("event_type, detail, created_at")
+    .eq("exam_id", examId)
+    .eq("student_id", studentId)
+    .order("created_at", { ascending: false });
+
+  if (error) return alert(`Could not read flags: ${error.message}`);
+
+  const dialog = document.getElementById("flagsDialog");
+  document.getElementById("flagsTitle").textContent = `${label} — ${(data ?? []).length} recorded events`;
+  const body = document.getElementById("flagsBody");
+
+  body.innerHTML = data?.length
+    ? `<table class="results incident-table">
+        <thead><tr><th>Time</th><th>Keyword</th><th>What happened</th><th>Detail</th></tr></thead>
+        <tbody>${data.map((i) => `<tr>
+          <td class="num">${escapeHtml(new Date(i.created_at).toLocaleString())}</td>
+          <td><code>${escapeHtml(i.event_type)}</code></td>
+          <td>${escapeHtml(WORDING[i.event_type] ?? i.event_type)}</td>
+          <td>${escapeHtml(i.detail || "—")}</td>
+        </tr>`).join("")}</tbody>
+      </table>`
+    : `<p class="empty">No anti-cheat events were recorded for this student on this paper.</p>`;
+
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
 }
 
 function subscribeToRoom() {
@@ -1179,10 +1287,16 @@ async function loadResults() {
         <td>${escapeHtml(r.name)}</td>
         <td class="num">${r.score}</td>
         <td><span class="tag ${r.status === "submitted" ? "pass" : ""}">${r.status.replace("_", " ")}</span></td>
-        <td><button class="btn ghost tiny" data-result-reset="${r.studentId}" data-result-label="${escapeHtml(r.name || r.roll || "student")}">Reset / reattempt</button></td>
+        <td class="actions">
+          <button class="btn ghost tiny" data-result-flags="${r.studentId}" data-result-label="${escapeHtml(r.name || r.roll || "student")}">View flags</button>
+          <button class="btn ghost tiny" data-result-reset="${r.studentId}" data-result-label="${escapeHtml(r.name || r.roll || "student")}">Reset / reattempt</button>
+        </td>
       </tr>`).join("")}</tbody>
     </table>`;
 
+  box.querySelectorAll("[data-result-flags]").forEach((b) => {
+    b.onclick = () => viewStudentFlags(exam_id, b.dataset.resultFlags, b.dataset.resultLabel);
+  });
   box.querySelectorAll("[data-result-reset]").forEach((b) => {
     b.onclick = async () => {
       await resetAttempt(exam_id, b.dataset.resultReset, b.dataset.resultLabel);
