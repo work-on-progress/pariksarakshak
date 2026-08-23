@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Student portal — PariksaRakshak</title>
+<title>My papers — PariksaRakshak</title>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,15 +26,15 @@
 <main class="console student-console">
 
   <section class="student-hero ruled">
-    <span class="eyebrow">Secure examination entry</span>
-    <h1>Choose your paper here. The exam opens in Safe Exam Browser.</h1>
-    <p class="muted">This page works in Chrome, Edge or Safari. When you press
-      <b>Start secure exam</b>, your browser asks permission to open Safe Exam
-      Browser — choose <b>Open</b>. The paper itself never opens in this browser.</p>
+    <span class="eyebrow">Examination entry</span>
+    <h1>Your papers.</h1>
+    <p class="muted">Press start on the paper you are sitting. You will be given a
+      six-digit code — type it into the exam window when it asks. The code lasts
+      five minutes and works once.</p>
   </section>
 
   <section class="panel" style="margin-top:1.5rem">
-    <div class="panel-head"><h2>Your papers</h2><span class="eyebrow" id="liveCount">looking…</span></div>
+    <div class="panel-head"><h2>Open now</h2><span class="eyebrow" id="liveCount">looking…</span></div>
     <div class="panel-body">
       <div id="examList" class="student-exam-list">
         <p class="empty">Checking for papers that are open…</p>
@@ -49,24 +49,32 @@
         <label class="field"><span>Exam code</span>
           <input id="examCode" class="code-entry" autocomplete="off" spellcheck="false" placeholder="CSE423-U1">
         </label>
-        <button class="btn" id="startByCodeBtn">Start secure exam</button>
+        <button class="btn" id="startByCodeBtn">Start</button>
       </div>
       <p id="portalMsg" class="notice error hidden" style="margin-top:.9rem"></p>
     </div>
   </section>
 
+  <!-- the six-digit code, shown after starting -->
+  <section class="panel entry-panel hidden" id="entryPanel" style="margin-top:1.25rem">
+    <div class="panel-head"><h2 id="entryHead">Your secure code</h2>
+      <span class="eyebrow" id="entryCountdown"></span></div>
+    <div class="panel-body">
+      <div class="entry-code" id="entryCode">000000</div>
+      <p class="muted" id="entrySteps"></p>
+      <div class="actions">
+        <button class="btn" id="openExamBtn">Open the exam window</button>
+        <button class="btn ghost" id="againBtn">Get a new code</button>
+      </div>
+    </div>
+  </section>
+
   <section class="panel seb-help" style="margin-top:1.25rem">
     <div class="panel-body">
-      <b>What happens when you press start</b>
-      <ol class="launch-steps">
-        <li>Your browser asks <b>Open Safe Exam Browser?</b> — choose Open.</li>
-        <li>Safe Exam Browser starts and locks the machine.</li>
-        <li>You are signed in automatically. No password to type again.</li>
-        <li>The paper you chose opens. Read the rules, then begin.</li>
-      </ol>
-      <p class="muted" style="font-size:.88rem;margin:.6rem 0 0">
-        Safe Exam Browser must already be installed on this machine. If nothing
-        happens when you press start, tell the invigilator.</p>
+      <b>If your paper is in the locked browser</b>
+      <p class="muted" style="font-size:.9rem;margin:.4rem 0 0">Safe Exam Browser must already
+        be installed. Press start, let it open, then type your six-digit code. If nothing
+        opens, tell the invigilator.</p>
     </div>
   </section>
 </main>
