@@ -28,6 +28,29 @@ what follows.
 | "Only faculty accounts can draft" | Account is still a student | Run the promote query in guide 00, part F |
 | Blanks question rejected | Blanks and answers do not match | The prompt needs one `____` per answer in the `A | B` list |
 
+## Answers not saving
+
+**Symptom:** "not saved — retrying" beside every question, or the banner at the
+top of the paper.
+
+**What it almost never is:** the network. If the questions loaded, the browser
+can reach Supabase — the questions came down the same connection.
+
+**What it usually is:** permissions. Saving an answer is an upsert, and the
+UPDATE half writes columns that earlier versions granted for INSERT only, so the
+second save of any question was refused with a 403. **Migration 005 fixes it.**
+
+The exam page now prints the real reason — the Postgres error code and message —
+in the banner and in the browser console, instead of hiding it behind a generic
+retry. If you still see a failure, that text names the cause.
+
+| Code in the banner | Meaning | Fix |
+|---|---|---|
+| `42501` | permission denied for a column | Run migration 005 |
+| `PGRST301` / policy text | a row-level policy refused it | The attempt is submitted, or the exam window has closed |
+| `23505` | duplicate | Harmless; the retry resolves it |
+| network wording | genuinely offline | Check the connection |
+
 ## The secure launch
 
 | What you see | Cause | Fix |
@@ -50,12 +73,23 @@ what follows.
 | Everyone blocked at the SEB gate | JavaScript API off, or the Config Key does not match this build | See the secure launch table above |
 | Page unstyled inside SEB | A domain is missing from the URL filter | Add the list from guide 05 |
 | Camera black inside SEB | Camera not allowed in SEB | SEB Security tab → allow camera; keep `camera=(self)` in `vercel.json` |
+| Coding: "Failed to fetch" | The runner did not answer with usable headers | Redeploy `run-code`, then run the ping check in guide 03 |
+| Coding: "the execution service did not respond" | Piston is unreachable or busy | Nothing was recorded. Retry, or avoid coding questions on that paper — code-based MCQs need no execution service |
 | Code runs time out | Public Piston is busy | Retry; then see guide 03 on pacing and self-hosting |
 | A student is stuck on a submitted paper | Crash after submit | The room tab → **Unlock**, then they press **Resume in SEB** |
 | The paper went dark mid-exam | The camera cover, after five seconds without a face | It clears by itself. Turn it off with `LOCK_ON_FACE_LOSS = false` if the lighting is poor |
 | Extra time granted but the timer did not change | The page re-reads every 30 seconds | Wait half a minute; no reload needed |
 | The room shows nothing | No attempts yet, or wrong paper selected | Check the selector; the roster only shows the chosen paper |
 | Site suddenly unreachable | Free project paused after a quiet week | Open the dashboard, wait about two minutes |
+
+## Browser-delivered papers
+
+| What you see | Cause | Fix |
+|---|---|---|
+| "This paper was opened somewhere else" | The single-session guard. The student opened it in a second window or on a second machine | Expected. They continue in the newest window, or you Unlock and they start again |
+| The paper is covered, asking to return to full screen | They left full screen. A page cannot force it back without a click | They press the button. Every exit is logged |
+| Far more incidents than an SEB paper | Normal. A browser paper logs every focus change | Read the counts relatively, not absolutely |
+| Students say the paper will not open in Chrome | The paper is set to locked browser | Papers tab → set it to browser or either, or have them use SEB |
 
 ## Marks
 

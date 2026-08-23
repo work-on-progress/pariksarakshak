@@ -1,14 +1,18 @@
-# 03 · The six functions
+# 03 · The functions
 
 All six live in `supabase/functions/`, run on Supabase, and hold the secrets that
 must never reach a browser.
 
 ```bash
-supabase functions deploy <name>
+supabase functions deploy generate-questions
+supabase functions deploy run-code
+supabase functions deploy manage-students
+supabase functions deploy create-seb-launch
 
-# these two run before the student has a session inside SEB:
+# these three answer before the student has a session, so JWT checking is off:
 supabase functions deploy exchange-seb-launch --no-verify-jwt
 supabase functions deploy verify-seb          --no-verify-jwt
+supabase functions deploy session-check       --no-verify-jwt
 ```
 
 | Function | Holds | Called by |
@@ -18,11 +22,29 @@ supabase functions deploy verify-seb          --no-verify-jwt
 | `manage-students` | the service key | faculty console |
 | `create-seb-launch` | the service key | the student portal |
 | `exchange-seb-launch` | the service key | the exam page, inside SEB |
-| `verify-seb` | the SEB Config Key | the exam page, on every load |
+| `verify-seb` | the SEB Config Key | the exam page, for SEB papers |
+| `session-check` | the service key | the exam page, every 30 seconds |
 
 ---
 
-## `generate-questions` — drafting a paper
+## `generate-questions` — writing and importing
+
+Two jobs, chosen by `mode`:
+
+**`generate`** takes a mix — rows of type, difficulty, count and marks — plus a
+topic or the text of your notes, and writes questions to match. The four MCQ
+kinds (theory, output, error, blank) each get their own instructions, and the
+coding level is stated explicitly so a beginner paper cannot come back full of
+comprehensions and recursion.
+
+**`import`** takes text lifted from a teacher's own document and turns it into
+structured rows. The prompt is blunt about this being transcription: reproduce
+each question as written, invent nothing, and never guess an answer the document
+does not mark. Anything without a marked key comes back empty for you to fill in.
+
+Full detail of the console side is in [11 · Building a question paper](11-QUESTION-BUILDER.md).
+
+## Older notes on drafting
 
 **What it does.** Checks the caller is faculty, builds a prompt from your topic and
 notes, calls Gemini with a strict `responseSchema` so the reply is always valid JSON
@@ -159,3 +181,50 @@ If the secret is missing the function replies `not_configured`, and the exam pag
 blocks everyone with that exact message rather than quietly letting them through.
 Rebuild the `.seb` file and the key changes — set the secret again, or every
 student is blocked at once.
+
+---
+
+## `session-check` — one paper, one place
+
+The exam page calls this every thirty seconds with the session token it was
+given at entry. If the answer is `revoked`, the paper was opened somewhere else
+and this copy locks itself with an explanation.
+
+It fails **open**: if the function errors, it replies `active: true`. A server
+hiccup must never take a paper away from a student mid-exam.
+
+```bash
+supabase functions deploy session-check --no-verify-jwt
+```
+
+---
+
+## If `run-code` said "Failed to fetch"
+
+`Failed to fetch` means the request never came back with usable headers — it is
+a transport failure, not a rejection. The runner now:
+
+- returns CORS headers on **every** path, including the ones that throw, so the
+  browser shows the real error instead of a network failure
+- answers `{"action":"ping"}` without needing an attempt, and reports whether
+  Piston itself is reachable — the setup page uses this
+- retries once on a timeout or a 429, and passes Piston's own error text through
+- tells the difference between "your code is wrong" and "the service is down",
+  and records nothing when the service is down
+
+Check it from the setup page, or by hand:
+
+```bash
+curl -s -X POST "https://YOUR_REF.supabase.co/functions/v1/run-code" \
+  -H "apikey: YOUR_ANON_KEY" -H "Content-Type: application/json" \
+  -d '{"action":"ping"}'
+```
+
+A healthy reply says `"piston":"reachable"`. If it says unreachable, coding
+questions will not run — either avoid them for that paper, or point the function
+at your own Piston host:
+
+```bash
+supabase secrets set PISTON_URL=https://your-host/api/v2/piston/execute
+supabase functions deploy run-code
+```

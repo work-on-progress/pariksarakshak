@@ -6,6 +6,8 @@ Two scripts, run in order, both safe to re-run:
 |---|---|
 | `001_schema.sql` | Every table, the security rules, the student view, grading |
 | `003_seb_launch_and_hardening.sql` | Takes away write permissions the browser does not need, moves faculty actions behind ownership-checked functions, and creates the launch-token table |
+| `004_seb_entry_codes.sql` | The six-digit entry codes and exam sessions |
+| `005_delivery_mode_and_question_mix.sql` | Delivery modes, question difficulty and MCQ kinds, and the answer-saving fix |
 | `002_demo_paper.sql` | Optional: a live demo paper to test with |
 
 ## What it builds
