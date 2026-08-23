@@ -114,13 +114,22 @@ async function startSecureExam(rawCode) {
     launch.protocol = location.protocol === "https:" ? "sebs:" : "seb:";
     launch.searchParams.set("launch", res.launch_token);
 
-    show("Opening Safe Exam Browser — approve the prompt in your browser.", "ok");
-    window.location.href = launch.toString();
-
-    setTimeout(() => {
-      show("If nothing opened, Safe Exam Browser may not be installed on this machine. Tell the invigilator, then press start again.", "warn");
-      setBusy(false);
-    }, 4000);
+    msg.className = "notice ok";
+msg.innerHTML = `
+  <b>Secure launch is ready.</b><br>
+  <span style="display:inline-block;margin:.45rem 0 .7rem">
+    Click below and choose <b>Open Safe Exam Browser</b>.
+  </span><br>
+  <a class="btn" href="${launch.toString()}">
+    Open Safe Exam Browser
+  </a>
+  <br>
+  <span class="meta" style="display:inline-block;margin-top:.65rem">
+    Do not log in again inside SEB.
+  </span>
+`;
+msg.classList.remove("hidden");
+setBusy(false);
   } finally {
     setTimeout(() => setBusy(false), 4500);
   }
