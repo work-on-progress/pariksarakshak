@@ -415,101 +415,11 @@ async function runProgram(
 // ============================================================
 
 async function resolvePythonCompiler(): Promise<string> {
-  const now = Date.now();
-
-  if (
-    pythonCompilerCache &&
-    pythonCompilerCache.expires > now
-  ) {
-    return pythonCompilerCache.name;
-  }
-
-  const res = await fetch(
-    `${WANDBOX_BASE}/list.json`,
-    {
-      signal:
-        AbortSignal.timeout(8000),
-      headers: {
-        Accept: "application/json",
-      },
-    },
-  );
-
-  if (!res.ok) {
-    throw new Error(
-      `Wandbox compiler list returned HTTP ${res.status}`,
-    );
-  }
-
-  const list = await res.json();
-
-  if (!Array.isArray(list)) {
-    throw new Error(
-      "Wandbox compiler list was not an array.",
-    );
-  }
-
-  const candidates =
-    list
-      .filter((c: any) => {
-        const language =
-          String(c?.language ?? "");
-
-        const version =
-          String(c?.version ?? "");
-
-        const name =
-          String(c?.name ?? "");
-
-        return (
-          language === "Python" &&
-          /python-3\./i.test(version) &&
-          /cpython/i.test(name)
-        );
-      })
-      .map((c: any) => ({
-        name:
-          String(c.name),
-        version:
-          String(c.version),
-      }));
-
-  if (!candidates.length) {
-    throw new Error(
-      "No CPython 3 compiler is currently listed by Wandbox.",
-    );
-  }
-
-  // Prefer a stable compiler over a moving "head" build.
-  const stable =
-    candidates.filter(
-      (c) =>
-        !/head/i.test(c.name),
-    );
-
-  const pool =
-    stable.length
-      ? stable
-      : candidates;
-
-  pool.sort(
-    (a, b) =>
-      compareVersion(
-        b.version,
-        a.version,
-      ),
-  );
-
-  const chosen =
-    pool[0].name;
-
-  pythonCompilerCache = {
-    name: chosen,
-    expires:
-      now + 15 * 60_000,
-  };
-
-  return chosen;
+  // Wandbox's own Python examples use cpython-head. Avoid a fragile
+  // compiler-list filter here: the previous filter expected the version
+  // string itself to contain "python-3.", which caused valid CPython
+  // entries to be rejected and every run to look like a service outage.
+  return "cpython-head";
 }
 
 async function runWandboxPython(
