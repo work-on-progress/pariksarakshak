@@ -128,32 +128,61 @@ Deno.serve(async (req) => {
     }
 
     /* ── call Gemini ── */
-    const gRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema,
-            temperature: mode === "import" ? 0.1 : 0.75,
-            maxOutputTokens: 8192,
-          },
-        }),
-      },
-    );
+    let gRes: Response | null = null;
+let lastDetail = "";
+let usedModel = "";
 
-    if (!gRes.ok) {
-      const detail = await gRes.text();
-      const hint = gRes.status === 429
-        ? "The free daily allowance is used up. Try again later, or ask for fewer questions."
-        : gRes.status === 404
-        ? "That model name is no longer available. Set the GEMINI_MODEL secret to a current model."
-        : detail.slice(0, 300);
-      return json({ error: `Question service: ${hint}` }, 502);
-    }
+for (const model of MODELS) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema,
+          temperature: mode === "import" ? 0.1 : 0.75,
+          maxOutputTokens: 8192,
+        },
+      }),
+    },
+  );
+
+  if (res.ok) {
+    gRes = res;
+    usedModel = model;
+    break;
+  }
+
+  lastDetail = await res.text();
+
+  // Try next free model only for temporary availability/model issues.
+  if (res.status === 503 || res.status === 404 || res.status === 429) {
+    continue;
+  }
+
+  return json(
+    { error: `Question service: ${lastDetail.slice(0, 300)}` },
+    502,
+  );
+}
+
+if (!gRes) {
+  return json(
+    {
+      error:
+        `All free Gemini models are currently unavailable. Last error: ${lastDetail.slice(0, 300)}`,
+    },
+    503,
+  );
+}
+
+console.log(`Question generation succeeded with ${usedModel}`);
 
     const gData = await gRes.json();
     const text = gData.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
