@@ -1,17 +1,17 @@
 // public/js/config.js
 // ══════════════════════════════════════════════════════════════════════════
-//  THE ONLY FILE YOU EDIT. Fill in the two Supabase values and you are done.
+// PariksaRakshak configuration
 // ══════════════════════════════════════════════════════════════════════════
 
 // Supabase → Project Settings → API
 export const SUPABASE_URL = "https://kjogruyffpafslowruzz.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_x_7w42XZ09y6el8gdv4ojA_KTUxxTHg";
 
-// The anon key above is meant to be public — row-level security decides what it
-// can read. The SERVICE KEY must NEVER appear in public/.
+// The anon key is public by design. Never put the SERVICE ROLE KEY in public/.
 
 export const INSTITUTE_NAME = "";
-export const SUPPORT_NOTE = "Ask your invigilator if anything on this page does not work.";
+export const SUPPORT_NOTE =
+  "Ask your invigilator if anything on this page does not work.";
 
 export const STUDENT_EMAIL_DOMAIN = "exam.local";
 
@@ -27,9 +27,12 @@ export const FACE_GRACE_MS = 30000;
 export const HEARTBEAT_MS = 30000;
 
 // ---- Browser-delivered papers -------------------------------------------
-// A genuine switch away is recorded.
-// The first five switches do NOT auto-submit.
-// The SIXTH genuine switch ends an ordinary-browser attempt automatically.
+// One genuine switch is counted once by anticheat.js even when blur and
+// visibilitychange fire together.
+//
+// Switches 1–5: recorded.
+// Switch 5: strong warning.
+// Switch 6: automatic submission.
 export const BROWSER_MODE = {
   requireFullscreen: true,
   blockOnFullscreenExit: true,
@@ -41,24 +44,58 @@ export const BROWSER_MODE = {
 };
 
 // ---- Document import ----------------------------------------------------
-export const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-export const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-export const MAMMOTH_URL = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+export const PDFJS_URL =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+
+export const PDFJS_WORKER =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+export const MAMMOTH_URL =
+  "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 
 // ---- Page extensions ----------------------------------------------------
-// These are loaded after the normal page modules finish evaluating.
-// No HTML file needs to be changed.
+// Loaded after each page's normal module finishes evaluating.
+// No HTML replacement is required.
 if (typeof window !== "undefined") {
   setTimeout(() => {
+    // Student dashboard: attempt history + released answer review.
     if (document.querySelector(".student-console")) {
       import("./student-history.js").catch((e) =>
         console.error("Student history could not load:", e)
       );
     }
 
-    if (document.getElementById("pane-results") && document.getElementById("resultExam")) {
+    // Faculty console.
+    if (
+      document.getElementById("pane-results") &&
+      document.getElementById("resultExam")
+    ) {
       import("./faculty-results-release.js").catch((e) =>
         console.error("Result release control could not load:", e)
+      );
+
+      import("./faculty-extras.js").catch((e) =>
+        console.error("Faculty exam-day enhancements could not load:", e)
+      );
+    }
+
+    // Exam window.
+    if (
+      document.getElementById("codeScreen") ||
+      document.getElementById("examScreen")
+    ) {
+      import("./exam-enhancements.js").catch((e) =>
+        console.error("Exam enhancements could not load:", e)
+      );
+    }
+
+    // Setup check.
+    if (
+      document.getElementById("checks") &&
+      document.getElementById("runBtn")
+    ) {
+      import("./setup-enhancements.js").catch((e) =>
+        console.error("Setup enhancements could not load:", e)
       );
     }
   }, 0);
