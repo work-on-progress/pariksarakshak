@@ -87,6 +87,11 @@ if (typeof window !== "undefined") {
       import("./exam-enhancements.js").catch((e) =>
         console.error("Exam enhancements could not load:", e)
       );
+
+      // Strict fullscreen gate + resume protection.
+      import("./exam-reliability.js").catch((e) =>
+        console.error("Exam reliability guard could not load:", e)
+      );
     }
 
     // Setup check.
