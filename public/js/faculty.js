@@ -263,11 +263,11 @@ function wireSources() {
 
   wireDrop("dropNotes", "notesFile", "pickNotes", "notesStatus", (text) => {
     importedText = text;
-    document.getElementById("sourceText").value = text.slice(0, 4000);
+    document.getElementById("sourceText").value = text;
   });
   wireDrop("dropPaper", "paperFile", "pickPaper", "paperStatus", (text) => {
     paperText = text;
-    document.getElementById("paperText").value = text.slice(0, 6000);
+    document.getElementById("paperText").value = text;
   });
 
   document.getElementById("parseLocalBtn").onclick = importLocally;
@@ -338,10 +338,27 @@ async function importWithAi() {
   if (res.error) return note("importMsg", escapeHtml(res.error), "error");
 
   draft = res.questions;
-  const missing = draft.filter((q) => q.qtype === "mcq" && !q.correct_key).length;
+  const missing = draft.filter((q) =>
+    (q.qtype === "mcq" && !q.correct_key) ||
+    (q.qtype === "cloze" && !(q.cloze_answers ?? []).length)
+  ).length;
+
+  const providerText = res.provider_usage
+    ? Object.entries(res.provider_usage)
+        .map(([name, count]) => `${name} ${count}`)
+        .join(" · ")
+    : "";
+
+  const chunkText = res.source_chunks
+    ? ` · ${res.source_chunks} document chunk${res.source_chunks === 1 ? "" : "s"} processed`
+    : "";
+
   note("importMsg",
-    `Read ${draft.length} questions${missing ? `, ${missing} without a marked answer — set those before saving` : ""}.`,
+    `Read ${draft.length} questions from the full document${chunkText}` +
+    `${providerText ? ` · ${providerText}` : ""}` +
+    `${missing ? ` · ${missing} objective answer${missing === 1 ? "" : "s"} still need review` : ""}.`,
     missing ? "warn" : "ok");
+
   renderDraft();
 }
 
@@ -408,7 +425,7 @@ function addMixRow(type = "mcq:theory", difficulty = "medium", count = 5, marks 
       ${["easy", "medium", "hard"].map((d) =>
         `<option value="${d}" ${d === difficulty ? "selected" : ""}>${d}</option>`).join("")}
     </select>
-    <input class="mix-count" type="number" min="0" max="30" value="${count}">
+    <input class="mix-count" type="number" min="0" max="50" value="${count}">
     <input class="mix-marks" type="number" min="0" step="0.5" value="${marks}">
     <button class="btn ghost tiny mix-drop">Remove</button>`;
 
@@ -463,8 +480,8 @@ async function generate() {
   }
 
   const total = mix.reduce((s, r) => s + r.count, 0);
-  if (total > 30) {
-    return note("genMsg", "Ask for 30 questions or fewer at a time — long requests come back trimmed. Run it twice.", "error");
+  if (total > 50) {
+    return note("genMsg", "Ask for 50 questions or fewer at a time. The server automatically divides large requests across the configured AI providers.", "error");
   }
 
   const btn = document.getElementById("genBtn");
@@ -485,11 +502,31 @@ async function generate() {
 
   draft = res.questions;
   const asked = total, got = draft.length;
+
+  const providerText = res.provider_usage
+    ? Object.entries(res.provider_usage)
+        .map(([name, count]) => `${name} ${count}`)
+        .join(" · ")
+    : "";
+
+  const sourceTextInfo = res.source_characters_used
+    ? ` · ${Number(res.source_characters_used).toLocaleString()} source characters used`
+    : "";
+
+  const review = Number(res.objective_questions_needing_review ?? 0);
+
   note("genMsg",
-    got === asked
-      ? `${got} questions written. Read them, edit anything, then save.`
-      : `${got} questions came back out of ${asked} asked for. Save these and run it again for the rest.`,
-    got === asked ? "ok" : "warn");
+    (got === asked
+      ? `${got} questions written`
+      : `${got} questions came back out of ${asked}`) +
+    `${providerText ? ` · ${providerText}` : ""}` +
+    `${sourceTextInfo}` +
+    `${review ? ` · ${review} answer${review === 1 ? "" : "s"} need review` : ""}. ` +
+    (got === asked
+      ? "Read them, edit anything, then save."
+      : "Generate the missing quantity again."),
+    got === asked && review === 0 ? "ok" : "warn");
+
   renderDraft();
 }
 
