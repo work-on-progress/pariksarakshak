@@ -2,15 +2,18 @@
 //
 // Exam-page safety and clarity enhancements.
 //
-// The core exam.js still owns the exam and marking.
-// This extension only adds:
-// - visible "switches n / 6" wording
-// - strong warning at 5 / 6
-// - answered / blank / coding-submitted summary near Final Submit
-// - retry of grade_attempt if the final submission RPC had a transient failure
+// HOTFIX:
+// The previous version installed the submission summary while the exam was still
+// on the six-digit entry screen. Its global MutationObserver then repeatedly
+// rewrote "Preparing submission summary…", creating an endless mutation loop.
+// That could starve the browser event loop and make the entry-code field and
+// buttons appear completely unresponsive.
 //
-// The actual auto-submit threshold remains enforced by exam.js + anticheat.js
-// using BROWSER_MODE.autoSubmitAfterSwitches.
+// This version:
+// - does NOT install/update the submission summary until the actual paper is visible
+// - schedules observer work instead of running it recursively inside mutations
+// - never writes the same "preparing" text repeatedly
+// - keeps the existing switch counter and final-submit retry behaviour
 
 import { supabase } from "./supabaseClient.js";
 import { BROWSER_MODE, AUTOSAVE_DELAY_MS } from "./config.js";
@@ -19,29 +22,55 @@ let currentAttemptId = null;
 let retryStarted = false;
 let attentionBusy = false;
 let capturingAttempt = false;
+let refreshQueued = false;
 
 boot();
 
 function boot() {
   const observer = new MutationObserver(() => {
-    patchSwitchCounter();
-    installSubmissionSummary();
-    updateSubmissionSummary();
-    captureCurrentAttempt();
-    detectReceiptAndRetry();
+    scheduleRefresh();
   });
 
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-ok"],
   });
 
-  patchSwitchCounter();
-  installSubmissionSummary();
-  captureCurrentAttempt();
+  // Run once after the current module stack is complete.
+  scheduleRefresh();
+
+  // Also refresh on focus in case the page was backgrounded while state changed.
+  window.addEventListener("focus", scheduleRefresh);
+}
+
+function scheduleRefresh() {
+  if (refreshQueued) return;
+  refreshQueued = true;
+
+  setTimeout(async () => {
+    refreshQueued = false;
+
+    patchSwitchCounter();
+
+    // IMPORTANT: do not create/update the submission summary on the code gate.
+    if (paperIsVisible()) {
+      installSubmissionSummary();
+      updateSubmissionSummary();
+      await captureCurrentAttempt();
+    }
+
+    detectReceiptAndRetry();
+  }, 0);
+}
+
+function paperIsVisible() {
+  const examScreen = document.getElementById("examScreen");
+  return Boolean(
+    examScreen &&
+    !examScreen.classList.contains("hidden")
+  );
 }
 
 function patchSwitchCounter() {
@@ -82,6 +111,8 @@ function patchSwitchCounter() {
 }
 
 function installSubmissionSummary() {
+  if (!paperIsVisible()) return;
+
   const finishBtn = document.getElementById("finishBtn");
   if (!finishBtn || document.getElementById("submissionSummary")) return;
 
@@ -91,27 +122,24 @@ function installSubmissionSummary() {
   box.style.cssText = "margin:.8rem 0;font-size:.9rem";
 
   finishBtn.parentElement?.insertBefore(box, finishBtn);
-  updateSubmissionSummary();
-
-  const area = document.getElementById("questionArea");
-  if (area) {
-    new MutationObserver(updateSubmissionSummary).observe(area, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["class", "data-ok"],
-    });
-  }
 }
 
 function updateSubmissionSummary() {
+  if (!paperIsVisible()) return;
+
   const box = document.getElementById("submissionSummary");
   if (!box) return;
 
   const cards = [...document.querySelectorAll(".qcard")];
+
   if (!cards.length) {
-    box.textContent = "Preparing submission summary…";
+    const preparing = "Preparing submission summary…";
+
+    // Critical: only write when the value actually changes.
+    if (box.textContent !== preparing) {
+      box.textContent = preparing;
+    }
+
     return;
   }
 
@@ -132,10 +160,13 @@ function updateSubmissionSummary() {
     ),
   ).length;
 
-  const signature = `${answered}|${total}|${blank}|${codingSubmitted}|${codingCards.length}`;
+  const signature =
+    `${answered}|${total}|${blank}|${codingSubmitted}|${codingCards.length}`;
+
   if (box.dataset.signature === signature) return;
 
   box.dataset.signature = signature;
+
   box.innerHTML = `
     <b>Before final submit:</b>
     ${answered} / ${total} answered ·
@@ -149,15 +180,15 @@ function updateSubmissionSummary() {
 }
 
 async function captureCurrentAttempt() {
-  if (currentAttemptId || capturingAttempt) return;
-
-  const examScreen = document.getElementById("examScreen");
-  if (!examScreen || examScreen.classList.contains("hidden")) return;
+  if (currentAttemptId || capturingAttempt || !paperIsVisible()) return;
 
   capturingAttempt = true;
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) return;
 
     const { data } = await supabase
