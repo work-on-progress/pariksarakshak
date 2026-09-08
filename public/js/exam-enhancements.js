@@ -113,15 +113,26 @@ function patchSwitchCounter() {
 function installSubmissionSummary() {
   if (!paperIsVisible()) return;
 
-  const finishBtn = document.getElementById("finishBtn");
-  if (!finishBtn || document.getElementById("submissionSummary")) return;
+  // Keep the long submission summary OUT of the sticky exam header.
+  // On mobile it made the header hundreds of pixels tall and hid questions.
+  const questionArea = document.getElementById("questionArea");
+  const paperSheet = document.querySelector(".paper-sheet");
+
+  if (
+    !questionArea ||
+    !paperSheet ||
+    document.getElementById("submissionSummary")
+  ) {
+    return;
+  }
 
   const box = document.createElement("div");
   box.id = "submissionSummary";
-  box.className = "notice";
-  box.style.cssText = "margin:.8rem 0;font-size:.9rem";
+  box.className = "notice submission-summary";
+  box.style.cssText = "margin:.4rem 0 1rem;font-size:.9rem";
 
-  finishBtn.parentElement?.insertBefore(box, finishBtn);
+  // Put the check AFTER all questions, not above Question 1.
+  questionArea.insertAdjacentElement("afterend", box);
 }
 
 function updateSubmissionSummary() {
@@ -168,14 +179,14 @@ function updateSubmissionSummary() {
   box.dataset.signature = signature;
 
   box.innerHTML = `
-    <b>Before final submit:</b>
-    ${answered} / ${total} answered ·
+    <b>Submission check:</b>
+    ${answered}/${total} answered ·
     ${blank} blank ·
-    coding submitted for marks ${codingSubmitted} / ${codingCards.length}
+    coding ${codingSubmitted}/${codingCards.length}
     ${
       blank > 0 || codingSubmitted < codingCards.length
-        ? `<br><span style="font-weight:600">Review the unfinished items before pressing Final Submit.</span>`
-        : `<br><span style="font-weight:600">Everything appears answered/submitted.</span>`
+        ? `<br><span style="font-weight:600">Review unfinished items before final submit.</span>`
+        : `<br><span style="font-weight:600">Everything appears complete.</span>`
     }`;
 }
 
