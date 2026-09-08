@@ -45,6 +45,7 @@ let running = false;
 
 let loopTimer = null;
 let watchdogTimer = null;
+let foregroundTimer = null;
 let recoveryPromise = null;
 
 let faceState = "__RESET__";
@@ -315,6 +316,57 @@ function startWatchdog() {
   }, WATCHDOG_MS);
 }
 
+
+/**
+ * Android/mobile browsers may pause video playback or temporarily suspend the
+ * camera while Chrome is in the background. The normal watchdog will recover
+ * within a few seconds, but on a phone we want recovery immediately after the
+ * student returns to Chrome.
+ */
+function handleForegroundResume() {
+  if (!running || document.hidden) return;
+
+  clearTimeout(foregroundTimer);
+
+  foregroundTimer = setTimeout(async () => {
+    if (!running || document.hidden) return;
+
+    try {
+      if (video?.paused) {
+        await video.play();
+      }
+    } catch {
+      // If playback cannot resume, the normal recovery path below reopens it.
+    }
+
+    if (!cameraHealthy()) {
+      scheduleCameraRecovery("returned to browser foreground");
+      return;
+    }
+
+    // Camera survived the background transition. Make sure the face detector
+    // is also available again.
+    if (!detector) {
+      loadDetector().catch(() => {});
+    }
+
+    camUi(
+      detector
+        ? "camera live · checking face"
+        : "camera live · loading face check",
+      "ok",
+    );
+  }, 250);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    handleForegroundResume();
+  }
+});
+
+window.addEventListener("pageshow", handleForegroundResume);
+
 function scheduleCameraRecovery(reason) {
   if (!running || recoveryPromise) {
     return recoveryPromise;
@@ -427,10 +479,12 @@ export function stopProctoring() {
 
   clearTimeout(loopTimer);
   clearInterval(watchdogTimer);
+  clearTimeout(foregroundTimer);
   clearTimeout(detectorRetryTimer);
 
   loopTimer = null;
   watchdogTimer = null;
+  foregroundTimer = null;
   detectorRetryTimer = null;
   recoveryPromise = null;
 
