@@ -85,6 +85,30 @@ function boot() {
       );
     },
   );
+
+  // Android Chrome may return from another app without a conventional desktop
+  // focus sequence. visibilitychange/pageshow are more reliable mobile signals.
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (!document.hidden) {
+        setTimeout(
+          ensureVisibleExamFullscreen,
+          180,
+        );
+      }
+    },
+  );
+
+  window.addEventListener(
+    "orientationchange",
+    () => {
+      setTimeout(
+        ensureVisibleExamFullscreen,
+        220,
+      );
+    },
+  );
 }
 
 function browserFullscreenRequired() {
