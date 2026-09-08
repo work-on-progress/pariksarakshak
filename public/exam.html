@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1218">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Examination — PariksaRakshak</title>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,11 +25,11 @@
 <div class="gate" id="codeScreen">
   <div class="gate-inner join-card">
     <img src="assets/logo-mark.svg" alt="">
-    <h1 style="text-align:left">Enter your exam code</h1>
+    <h1 style="text-align:left">Enter your 6-digit secure code</h1>
     <p style="text-align:left">The six digits shown on the portal, on the machine you
       signed in with. The code lasts five minutes and works once.</p>
-    <label class="field"><span>Six-digit code</span>
-      <input id="entryCode" class="code-entry" inputmode="numeric" autocomplete="off"
+    <label class="field"><span>Six-digit secure code</span>
+      <input id="entryCode" class="code-entry" inputmode="numeric" autocomplete="one-time-code"
              spellcheck="false" maxlength="6" placeholder="000000">
     </label>
     <button class="btn block" id="enterBtn">Open my paper</button>
@@ -63,7 +65,7 @@
     <span class="tag" id="modeTag"></span>
     <span class="spacer"></span>
     <span class="attention hidden" id="attention"></span>
-    <video id="cam" class="cam" muted playsinline></video>
+    <video id="cam" class="cam" muted playsinline autoplay></video>
     <span class="cam-state" id="camState">camera off</span>
     <span class="timer" id="timer">--:--</span>
     <button class="btn danger" id="finishBtn">Finish &amp; submit</button>
