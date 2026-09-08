@@ -153,10 +153,27 @@ function injectMobileStyles() {
     }
 
     @media (max-width: 700px), (pointer: coarse) {
+      html,
+      body {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden;
+      }
+
       input,
       textarea,
       select {
         font-size: 16px !important;
+      }
+
+      #submissionSummary.submission-summary {
+        position: static !important;
+        width: 100%;
+        max-width: 100%;
+        margin: .3rem 0 1rem !important;
+        padding: .65rem .7rem;
+        font-size: .8rem !important;
+        line-height: 1.35;
       }
 
       .join-card {
@@ -172,15 +189,15 @@ function injectMobileStyles() {
       .hall-bar {
         top: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto 58px;
-        grid-template-rows: auto auto auto;
-        gap: .3rem .5rem;
+        grid-template-columns: minmax(0, 1fr) auto 50px;
+        grid-template-rows: auto auto;
+        gap: .28rem .45rem;
         align-items: center;
         padding:
-          max(.45rem, env(safe-area-inset-top))
-          max(.55rem, env(safe-area-inset-right))
-          .45rem
-          max(.55rem, env(safe-area-inset-left));
+          max(.38rem, env(safe-area-inset-top))
+          max(.5rem, env(safe-area-inset-right))
+          .38rem
+          max(.5rem, env(safe-area-inset-left));
       }
 
       .hall-bar > img {
@@ -213,56 +230,56 @@ function injectMobileStyles() {
 
       #cam {
         grid-column: 3;
-        grid-row: 1 / 3;
-        width: 54px;
-        height: 42px;
+        grid-row: 1;
+        width: 46px;
+        height: 36px;
         justify-self: end;
-        align-self: start;
+        align-self: center;
       }
 
       #camState {
-        grid-column: 3;
-        grid-row: 2;
-        max-width: 58px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        text-align: center;
-        font-size: .46rem;
+        display: none;
       }
 
       #attention {
-        grid-column: 1 / 3;
+        grid-column: 1;
         grid-row: 2;
         min-width: 0;
-        font-size: .62rem;
-        line-height: 1.25;
+        font-size: .58rem;
+        line-height: 1.2;
+        white-space: normal;
       }
 
       #finishBtn {
-        grid-column: 1 / 4;
-        grid-row: 3;
-        width: 100%;
-        min-height: 42px;
+        grid-column: 2 / 4;
+        grid-row: 2;
+        justify-self: end;
+        width: auto;
+        min-height: 34px;
+        max-width: 150px;
         justify-content: center;
-        padding: .46rem .7rem;
+        padding: .34rem .58rem;
+        font-size: .78rem;
+        white-space: nowrap;
       }
 
       .paper-sheet {
         width: 100%;
         max-width: 100%;
+        min-width: 0;
         padding:
-          .65rem
-          max(.6rem, env(safe-area-inset-right))
-          calc(5rem + env(safe-area-inset-bottom))
-          max(.6rem, env(safe-area-inset-left));
-        gap: .8rem;
+          .42rem
+          max(.5rem, env(safe-area-inset-right))
+          calc(4rem + env(safe-area-inset-bottom))
+          max(.5rem, env(safe-area-inset-left));
+        gap: .72rem;
+        overflow-x: clip;
       }
 
       .progress-strip {
-        top: 8.2rem;
+        top: 4.9rem;
         gap: 3px;
-        padding: .35rem 0;
+        padding: .28rem 0;
       }
 
       .pip {
@@ -270,8 +287,29 @@ function injectMobileStyles() {
       }
 
       .qcard {
-        padding: .9rem .85rem;
+        padding: .85rem .78rem;
         border-radius: 10px;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+      }
+
+      .qcard .prompt,
+      .qcard p,
+      .choice,
+      .choice label,
+      .choice span {
+        min-width: 0;
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .qcard .prompt {
+        font-size: .98rem;
+        line-height: 1.48;
+        margin-bottom: .8rem;
       }
 
       .qcard > header {
@@ -286,8 +324,17 @@ function injectMobileStyles() {
       }
 
       .choice {
-        min-height: 48px;
-        padding: .7rem;
+        width: 100%;
+        min-height: 46px;
+        padding: .62rem;
+        gap: .55rem;
+        font-size: .95rem;
+        line-height: 1.4;
+      }
+
+      .choice input {
+        flex: 0 0 auto;
+        margin-top: .18rem;
       }
 
       .blanks {
