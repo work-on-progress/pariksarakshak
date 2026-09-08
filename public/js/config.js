@@ -94,6 +94,17 @@ if (typeof window !== "undefined") {
       );
     }
 
+    // Android Chrome / mobile compatibility layer.
+    if (
+      document.querySelector(".student-console") ||
+      document.getElementById("codeScreen") ||
+      document.getElementById("examScreen")
+    ) {
+      import("./mobile-exam.js").catch((e) =>
+        console.error("Mobile exam compatibility layer could not load:", e)
+      );
+    }
+
     // Setup check.
     if (
       document.getElementById("checks") &&
