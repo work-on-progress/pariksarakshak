@@ -178,21 +178,47 @@ export async function requestFullscreen() {
 
   const el = document.documentElement;
 
-  const fn =
-    el.requestFullscreen ||
+  const standard = el.requestFullscreen;
+  const prefixed =
     el.webkitRequestFullscreen ||
     el.msRequestFullscreen;
 
   try {
-    const result = fn.call(el);
+    let result;
 
-    if (result?.then) {
-      await result;
+    if (typeof standard === "function") {
+      // navigationUI:"hide" is a best-effort request. Android Chrome may hide
+      // more browser chrome while the exam is fullscreen. Browsers that do not
+      // support the option may reject it, so we retry without options below.
+      try {
+        result = standard.call(el, {
+          navigationUI: "hide",
+        });
+      } catch {
+        result = standard.call(el);
+      }
+    } else {
+      result = prefixed.call(el);
     }
 
-    // Let the browser publish fullscreenElement/fullscreenchange.
+    if (result?.then) {
+      try {
+        await result;
+      } catch (firstError) {
+        // Some browsers expose requestFullscreen but reject the navigationUI
+        // option asynchronously. Retry the plain request once.
+        if (typeof standard === "function" && !isFullscreenActive()) {
+          const retry = standard.call(el);
+          if (retry?.then) await retry;
+        } else {
+          throw firstError;
+        }
+      }
+    }
+
+    // Android can publish fullscreenElement a little later than desktop.
     await new Promise((resolve) =>
-      setTimeout(resolve, 80)
+      setTimeout(resolve, 140)
     );
 
     return isFullscreenActive();
@@ -537,6 +563,11 @@ export function activateFocusMonitor({
 
   window.addEventListener(
     "focus",
+    returned,
+  );
+
+  window.addEventListener(
+    "pageshow",
     returned,
   );
 
