@@ -1142,6 +1142,8 @@ function wireManual() {
   document.getElementById("addTest").onclick = () => addTestRow();
   document.getElementById("mSave").onclick = saveManual;
   document.getElementById("mPreview").onclick = previewManualQuestion;
+  document.getElementById("mEnhanceAi").onclick = () => enhanceManualWithAi("enhance");
+  document.getElementById("mFillMissingAi").onclick = () => enhanceManualWithAi("fill_missing");
   document.getElementById("mCancel").onclick = resetManualForm;
 
   attachRichEditor(document.getElementById("mPrompt"));
@@ -1262,6 +1264,289 @@ function manualQuestionObject() {
     output_format: document.getElementById("mOutputFormat")?.value ?? "",
     constraints_text: document.getElementById("mConstraints")?.value ?? "",
   };
+}
+
+function currentManualAiPayload() {
+  const qtype = val("mType");
+  const optionValues = ["A", "B", "C", "D"].map((L) => val("mOpt" + L));
+  const nonEmptyOptions = optionValues.filter(Boolean);
+
+  const currentTests = readTestRows();
+
+  const estimated = Number(val("mEstimated"));
+
+  return {
+    qtype,
+    mcq_kind: qtype === "mcq" ? val("mKind") : "theory",
+    difficulty: val("mDiff") || "medium",
+    marks: Number(val("mMarks")) || (qtype === "coding" ? 10 : qtype === "long" ? 5 : 1),
+
+    prompt: richFieldText("mPrompt"),
+    prompt_html: richFieldHtml("mPrompt"),
+    code_snippet: val("mSnippet"),
+
+    options: nonEmptyOptions,
+    correct_key:
+      qtype === "mcq" && nonEmptyOptions.length >= 2
+        ? val("mKey")
+        : "",
+
+    cloze_answers:
+      qtype === "cloze"
+        ? val("mCloze").split("|").map((x) => x.trim()).filter(Boolean)
+        : [],
+
+    explanation: richFieldText("mExplain"),
+    explanation_html: richFieldHtml("mExplain"),
+
+    language: qtype === "coding" ? val("mLang") : "",
+    starter_code:
+      qtype === "coding"
+        ? document.getElementById("mStarter").value
+        : "",
+    input_format:
+      qtype === "coding"
+        ? document.getElementById("mInputFormat").value.trim()
+        : "",
+    output_format:
+      qtype === "coding"
+        ? document.getElementById("mOutputFormat").value.trim()
+        : "",
+    constraints_text:
+      qtype === "coding"
+        ? document.getElementById("mConstraints").value.trim()
+        : "",
+    reference_solution:
+      qtype === "coding"
+        ? document.getElementById("mReferenceSolution").value
+        : "",
+    test_cases:
+      qtype === "coding"
+        ? currentTests.map((t) => ({
+            stdin: t.stdin,
+            expected_out: t.expected_out,
+            is_hidden: true,
+          }))
+        : [],
+
+    reference_answer:
+      qtype === "long"
+        ? richFieldText("mReferenceAnswer")
+        : "",
+    marking_rubric:
+      qtype === "long"
+        ? richFieldText("mRubric")
+        : "",
+
+    topic: val("mTopic"),
+    subtopic: val("mSubtopic"),
+    bloom_level: val("mBloom"),
+    estimated_minutes:
+      Number.isFinite(estimated) && estimated > 0 ? estimated : 0,
+    tags: readTags("mTags"),
+  };
+}
+
+function manualAiHasEnoughInput(q) {
+  return Boolean(
+    q.prompt ||
+    q.code_snippet ||
+    q.reference_solution ||
+    q.starter_code ||
+    q.options?.length ||
+    q.cloze_answers?.length ||
+    q.reference_answer ||
+    q.test_cases?.length
+  );
+}
+
+function setManualAiBusy(busy, strategy = "enhance") {
+  const enhance = document.getElementById("mEnhanceAi");
+  const fill = document.getElementById("mFillMissingAi");
+
+  enhance.disabled = busy;
+  fill.disabled = busy;
+
+  if (busy) {
+    enhance.textContent =
+      strategy === "fill_missing"
+        ? "AI is filling fields…"
+        : "AI is enhancing…";
+    fill.textContent = "Please wait…";
+  } else {
+    enhance.textContent = "✦ Enhance with AI";
+    fill.textContent = "Fill missing fields only";
+  }
+}
+
+async function enhanceManualWithAi(strategy = "enhance") {
+  const current = currentManualAiPayload();
+
+  if (!manualAiHasEnoughInput(current)) {
+    return note(
+      "mAiMsg",
+      "Type at least one rough question, code snippet, answer, option or test case first. AI will build the rest from that.",
+      "warn",
+    );
+  }
+
+  setManualAiBusy(true, strategy);
+
+  note(
+    "mAiMsg",
+    strategy === "fill_missing"
+      ? "AI is filling only the empty fields. Your existing content will be kept."
+      : "AI is polishing the question and completing the missing authoring fields.",
+    "",
+  );
+
+  try {
+    const res = await callFunction("generate-questions", {
+      mode: "manual_enhance",
+      strategy,
+      question: current,
+      language: current.language || val("codeLang") || "python",
+      coding_level: val("codingLevel") || "beginner",
+    });
+
+    if (res.error) {
+      return note("mAiMsg", escapeHtml(res.error), "error");
+    }
+
+    if (!res.question) {
+      return note(
+        "mAiMsg",
+        "AI returned no usable question. Keep your current text and try again.",
+        "warn",
+      );
+    }
+
+    applyManualAiQuestion(res.question, strategy);
+
+    const providerText =
+      res.provider
+        ? ` · ${escapeHtml(res.provider)}${res.model ? ` / ${escapeHtml(res.model)}` : ""}`
+        : "";
+
+    note(
+      "mAiMsg",
+      strategy === "fill_missing"
+        ? `Missing fields completed${providerText}. Review everything, then save.`
+        : `Question enhanced and completed${providerText}. Review everything, then save.`,
+      "ok",
+    );
+  } catch (e) {
+    note(
+      "mAiMsg",
+      escapeHtml(e?.message || String(e)),
+      "error",
+    );
+  } finally {
+    setManualAiBusy(false, strategy);
+  }
+}
+
+function applyManualAiQuestion(q, strategy) {
+  const qtype = q.qtype || val("mType");
+
+  document.getElementById("mType").value = qtype;
+
+  if (q.difficulty) {
+    document.getElementById("mDiff").value = q.difficulty;
+  }
+
+  if (Number(q.marks) > 0) {
+    document.getElementById("mMarks").value = q.marks;
+  }
+
+  if (qtype === "mcq" && q.mcq_kind) {
+    document.getElementById("mKind").value = q.mcq_kind;
+  }
+
+  switchManualType();
+
+  if (q.prompt) {
+    setRichSource("mPrompt", q.prompt);
+  }
+
+  if (q.code_snippet !== undefined && q.code_snippet !== null) {
+    document.getElementById("mSnippet").value = q.code_snippet || "";
+  }
+
+  document.getElementById("mTopic").value = q.topic || "";
+  document.getElementById("mSubtopic").value = q.subtopic || "";
+  document.getElementById("mBloom").value = q.bloom_level || "";
+  document.getElementById("mEstimated").value =
+    Number(q.estimated_minutes) > 0 ? q.estimated_minutes : "";
+  document.getElementById("mTags").value =
+    Array.isArray(q.tags) ? q.tags.join(", ") : "";
+
+  if (q.explanation) {
+    setRichSource("mExplain", q.explanation);
+  } else if (strategy === "enhance") {
+    setRichSource("mExplain", "");
+  }
+
+  if (qtype === "mcq") {
+    const options = Array.isArray(q.options) ? q.options : [];
+
+    ["A", "B", "C", "D"].forEach((L, i) => {
+      document.getElementById("mOpt" + L).value =
+        String(options[i] ?? "")
+          .replace(/^\s*[A-D][.)]\s*/i, "")
+          .trim();
+    });
+
+    document.getElementById("mKey").value =
+      ["A", "B", "C", "D"].includes(String(q.correct_key || "").toUpperCase())
+        ? String(q.correct_key).toUpperCase()
+        : "A";
+  }
+
+  if (qtype === "cloze") {
+    document.getElementById("mCloze").value =
+      Array.isArray(q.cloze_answers)
+        ? q.cloze_answers.join(" | ")
+        : "";
+  }
+
+  if (qtype === "long") {
+    setRichSource("mReferenceAnswer", q.reference_answer || "");
+    setRichSource("mRubric", q.marking_rubric || "");
+  } else {
+    setRichSource("mReferenceAnswer", "");
+    setRichSource("mRubric", "");
+  }
+
+  if (qtype === "coding") {
+    if (q.language) {
+      document.getElementById("mLang").value = q.language;
+    }
+
+    document.getElementById("mInputFormat").value = q.input_format || "";
+    document.getElementById("mOutputFormat").value = q.output_format || "";
+    document.getElementById("mConstraints").value = q.constraints_text || "";
+    document.getElementById("mStarter").value = q.starter_code || "";
+    document.getElementById("mReferenceSolution").value =
+      q.reference_solution || "";
+
+    const tests = Array.isArray(q.test_cases) ? q.test_cases : [];
+
+    if (tests.length) {
+      const box = document.getElementById("mTests");
+      box.innerHTML = "";
+
+      tests.forEach((t) =>
+        addTestRow(
+          String(t.stdin ?? ""),
+          String(t.expected_out ?? ""),
+          true,
+        )
+      );
+    }
+  }
+
+  document.getElementById("mPrompt")?._richSurface?.focus();
 }
 
 function previewManualQuestion() {
@@ -1436,6 +1721,7 @@ function resetManualForm() {
   setRichSource("mExplain", "");
   setRichSource("mReferenceAnswer", "");
   setRichSource("mRubric", "");
+  note("mAiMsg", "", "");
 
   document.getElementById("mTests").innerHTML = "";
   addTestRow("", "", false);
