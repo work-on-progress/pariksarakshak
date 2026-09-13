@@ -727,12 +727,36 @@ function switchManualType() {
 function addTestRow(stdin = "", expected = "", hidden = true) {
   const row = document.createElement("div");
   row.className = "testrow";
-  row.innerHTML = `
-    <input class="t-in" placeholder="input" value="${escapeHtml(stdin)}">
-    <input class="t-out" placeholder="expected output" value="${escapeHtml(expected)}">
-    <label><input type="checkbox" class="t-hidden" ${hidden ? "checked" : ""}> hidden</label>
-    <button class="btn ghost tiny">×</button>`;
-  row.querySelector("button").onclick = () => row.remove();
+
+  // Multiline coding test cases:
+  // Every line is preserved exactly when saved to test_cases.stdin /
+  // test_cases.expected_out and later sent to Judge0.
+  const input = document.createElement("textarea");
+  input.className = "t-in";
+  input.rows = 3;
+  input.placeholder = "input — one line per input() value";
+  input.value = String(stdin ?? "");
+
+  const output = document.createElement("textarea");
+  output.className = "t-out";
+  output.rows = 3;
+  output.placeholder = "expected output — preserve line breaks";
+  output.value = String(expected ?? "");
+
+  const hiddenLabel = document.createElement("label");
+  const hiddenBox = document.createElement("input");
+  hiddenBox.type = "checkbox";
+  hiddenBox.className = "t-hidden";
+  hiddenBox.checked = Boolean(hidden);
+  hiddenLabel.append(hiddenBox, document.createTextNode(" hidden"));
+
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "btn ghost tiny";
+  removeBtn.type = "button";
+  removeBtn.textContent = "×";
+  removeBtn.onclick = () => row.remove();
+
+  row.append(input, output, hiddenLabel, removeBtn);
   document.getElementById("mTests").appendChild(row);
 }
 
