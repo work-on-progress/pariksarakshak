@@ -352,6 +352,123 @@ const LABEL = { mcq: "Multiple choice", cloze: "Fill the blanks", long: "Long an
 const TAGCLASS = { mcq: "blue", cloze: "warn", long: "", coding: "pass" };
 const KIND_LABEL = { output: "what does it print", error: "find the mistake", blank: "complete the code" };
 
+const STUDENT_RICH_TAGS = new Set([
+  "P", "BR", "STRONG", "B", "EM", "I", "U",
+  "UL", "OL", "LI", "CODE", "PRE", "BLOCKQUOTE",
+  "H3", "H4", "SUP", "SUB",
+]);
+
+function sanitizeStudentRichHtml(value) {
+  const template = document.createElement("template");
+  template.innerHTML = String(value ?? "");
+
+  const clean = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) return;
+      if (child.nodeType !== Node.ELEMENT_NODE) {
+        child.remove();
+        return;
+      }
+
+      const tag = child.tagName.toUpperCase();
+      if (["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "MATH"].includes(tag)) {
+        child.remove();
+        return;
+      }
+
+      clean(child);
+
+      if (!STUDENT_RICH_TAGS.has(tag)) {
+        child.replaceWith(...child.childNodes);
+        return;
+      }
+
+      [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
+    });
+  };
+
+  clean(template.content);
+  return template.innerHTML.trim();
+}
+
+function renderQuestionRich(target, html, fallback) {
+  const safe = html ? sanitizeStudentRichHtml(html) : "";
+  if (safe) target.innerHTML = safe;
+  else target.textContent = fallback ?? "";
+}
+
+function renderCodingSpec(q, body) {
+  const rows = [
+    ["Input format", q.input_format],
+    ["Output format", q.output_format],
+    ["Constraints", q.constraints_text],
+  ].filter(([, value]) => String(value ?? "").trim());
+
+  if (!rows.length) return;
+
+  const spec = document.createElement("section");
+  spec.className = "coding-spec";
+
+  rows.forEach(([label, value]) => {
+    const block = document.createElement("div");
+    const title = document.createElement("b");
+    const pre = document.createElement("pre");
+    title.textContent = label;
+    pre.textContent = String(value ?? "");
+    block.append(title, pre);
+    spec.appendChild(block);
+  });
+
+  body.appendChild(spec);
+}
+
+async function loadVisibleCodingExamples(questionId, target) {
+  target.innerHTML = `<span class="meta">Loading sample tests…</span>`;
+
+  const { data, error } = await supabase
+    .from("test_cases")
+    .select("stdin, expected_out, position")
+    .eq("question_id", questionId)
+    .eq("is_hidden", false)
+    .order("position")
+    .limit(2);
+
+  if (error) {
+    target.innerHTML = "";
+    return;
+  }
+
+  const tests = data ?? [];
+  target.innerHTML = "";
+  if (!tests.length) return;
+
+  const heading = document.createElement("div");
+  heading.className = "coding-samples-heading";
+  heading.innerHTML = `<b>Sample tests</b><span>These examples are visible. Final marks also use hidden tests.</span>`;
+  target.appendChild(heading);
+
+  tests.forEach((test, index) => {
+    const card = document.createElement("div");
+    card.className = "sample-test-card";
+
+    const title = document.createElement("b");
+    title.textContent = `Sample ${index + 1}`;
+
+    const compare = document.createElement("div");
+    compare.className = "test-compare sample-test-compare";
+    compare.innerHTML = `
+      <div><span>INPUT</span><pre></pre></div>
+      <div><span>EXPECTED OUTPUT</span><pre></pre></div>`;
+
+    const pres = compare.querySelectorAll("pre");
+    pres[0].textContent = test.stdin || "(no input)";
+    pres[1].textContent = test.expected_out || "(nothing)";
+
+    card.append(title, compare);
+    target.appendChild(card);
+  });
+}
+
 function renderPaper(saved) {
   const area = document.getElementById("questionArea");
   const strip = document.getElementById("progress");
@@ -393,7 +510,11 @@ function renderPaper(saved) {
       ${q.code_snippet ? `<pre class="snippet"></pre>` : ""}
       <div class="body"></div>`;
 
-    card.querySelector(".prompt").textContent = q.prompt;
+    renderQuestionRich(
+      card.querySelector(".prompt"),
+      q.prompt_html,
+      q.prompt,
+    );
     if (q.code_snippet) card.querySelector(".snippet").textContent = q.code_snippet;
     area.appendChild(card);
 
@@ -496,6 +617,13 @@ function buildLong(q, body, state, prior) {
 }
 
 function buildCoding(q, body, state, prior) {
+  renderCodingSpec(q, body);
+
+  const samples = document.createElement("section");
+  samples.className = "coding-samples";
+  body.appendChild(samples);
+  loadVisibleCodingExamples(q.id, samples);
+
   const wrap = document.createElement("div");
   wrap.className = "editor-wrap";
   const ta = document.createElement("textarea");
