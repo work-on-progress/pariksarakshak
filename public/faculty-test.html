@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1218">
+<title>Faculty Test Mode — PariksaRakshak</title>
+
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+</head>
+
+<body class="hall faculty-test-mode">
+<header class="faculty-test-topbar">
+  <a class="brand" href="faculty.html">
+    <img src="assets/logo-mark.svg" alt="">
+    <b>Pariksa<i>Rakshak</i></b>
+  </a>
+
+  <span class="tag warn faculty-test-badge">FACULTY TEST MODE</span>
+  <span class="faculty-test-title" id="testPaperTitle">Loading paper…</span>
+  <span class="spacer"></span>
+
+  <span class="faculty-test-progress" id="testProgress">0 / 0 answered</span>
+  <span class="timer" id="testTimer">--:--</span>
+
+  <button class="btn danger hidden" id="testFinishBtn">Finish test</button>
+  <a class="btn ghost small" href="faculty.html">Back to console</a>
+</header>
+
+<main class="faculty-test-main">
+  <section class="faculty-test-intro" id="testIntro">
+    <div class="faculty-test-intro-card">
+      <span class="eyebrow">Safe faculty sandbox</span>
+      <h1 id="testIntroTitle">Loading paper…</h1>
+      <p>
+        See this paper from the student's side, answer every question,
+        run coding tests and verify the final result before the real exam.
+      </p>
+
+      <div class="faculty-test-facts" id="testFacts"></div>
+
+      <div class="notice warn">
+        <b>This is only a test.</b>
+        No student attempt, answer, incident, score or result is written to the database.
+        Anti-cheat, camera and fullscreen enforcement are intentionally disabled here.
+      </div>
+
+      <div class="actions">
+        <button class="btn" id="startFacultyTest">Start test</button>
+        <a class="btn ghost" href="faculty.html">Back to console</a>
+      </div>
+
+      <p id="testLoadMsg" class="notice hidden"></p>
+    </div>
+  </section>
+
+  <section class="hidden" id="testPaper">
+    <div class="faculty-test-nav" id="testQuestionNav"></div>
+    <div id="testQuestionArea"></div>
+
+    <section class="faculty-test-end-card">
+      <h2>Ready to check the paper?</h2>
+      <p>
+        Finish Test checks objective answers and all coding tests, then shows
+        the correct answers, explanations and reference solutions for faculty review.
+      </p>
+      <button class="btn danger" id="testFinishBottom">Finish test & compare</button>
+    </section>
+  </section>
+
+  <section class="hidden" id="testResults"></section>
+</main>
+
+<script type="module" src="js/faculty-test.js"></script>
+</body>
+</html>
