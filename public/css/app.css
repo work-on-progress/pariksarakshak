@@ -2205,3 +2205,91 @@ table.results input { width: 70px; font-family: var(--mono); padding: .25rem .4r
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* =========================================================================
+   V15 — MANUAL QUESTION AI ASSISTANT
+   ========================================================================= */
+
+.manual-ai-assistant {
+  display: grid;
+  gap: .85rem;
+  margin: .85rem 0 1.15rem;
+  padding: .95rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--rule));
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--blue-wash) 82%, transparent),
+      color-mix(in srgb, var(--card-2) 94%, transparent)
+    );
+}
+
+.manual-ai-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+}
+
+.manual-ai-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, var(--rule));
+  border-radius: 10px;
+  background: var(--blue-wash);
+  color: var(--blue-deep);
+  font-size: 1rem;
+}
+
+.manual-ai-copy > div {
+  display: grid;
+  gap: .15rem;
+}
+
+.manual-ai-copy b {
+  font-family: var(--display);
+  font-size: .96rem;
+}
+
+.manual-ai-copy span {
+  max-width: 72ch;
+  color: var(--ink-2);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.manual-ai-actions {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+}
+
+.manual-ai-actions .btn:first-child {
+  background: linear-gradient(
+    135deg,
+    var(--blue),
+    color-mix(in srgb, var(--blue) 75%, white)
+  );
+  color: #07111c;
+}
+
+.manual-ai-assistant #mAiMsg {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .manual-ai-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .manual-ai-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
