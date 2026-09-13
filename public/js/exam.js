@@ -49,6 +49,12 @@ let globalSaveIndicator = null;
 // EXAM_EXPERIENCE_V2
 let questionFocusObserver = null;
 
+// EXAM_UX_V3
+// Review marks are navigation-only state and do not affect grading.
+const reviewQuestions = new Set();
+let finalReviewOverlay = null;
+let finalReviewResolve = null;
+
 boot();
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -263,6 +269,7 @@ async function openPaper(resuming) {
   document.getElementById("finishBtn").onclick = () => finish(false);
 
   installGlobalSaveIndicator();
+  loadReviewMarks();
   renderPaper(saved);
   updateGlobalSaveIndicator();
   recomputeEndsAt();
@@ -322,7 +329,10 @@ function renderPaper(saved) {
 
   questions.forEach((q, i) => {
     const pip = document.createElement("button");
-    pip.className = "pip" + (answered[q.id] ? " done" : "");
+    pip.className =
+      "pip" +
+      (answered[q.id] ? " done" : "") +
+      (reviewQuestions.has(q.id) ? " review" : "");
     pip.id = `pip-${q.id}`;
     pip.title = `Question ${i + 1}`;
     pip.textContent = String(i + 1);
@@ -364,8 +374,11 @@ function renderPaper(saved) {
     if (q.qtype === "cloze")  buildCloze(q, body, state, prior);
     if (q.qtype === "long")   buildLong(q, body, state, prior);
     if (q.qtype === "coding") buildCoding(q, body, state, prior);
+
+    card.appendChild(buildQuestionNav(q, i));
   });
 
+  installSectionProgress();
   updateExamProgressSummary();
   installQuestionFocusTracking();
 }
@@ -521,11 +534,394 @@ function updateExamProgressSummary() {
   const total = questions.length;
   const done = questions.filter((q) => Boolean(answered[q.id])).length;
   const left = Math.max(total - done, 0);
+  const review = reviewQuestions.size;
 
-  el.textContent =
-    left === 0 && total
-      ? `${done} / ${total} answered · complete`
-      : `${done} / ${total} answered`;
+  if (left === 0 && total && review === 0) {
+    el.textContent = `${done} / ${total} answered · complete`;
+  } else if (review) {
+    el.textContent =
+      `${done} / ${total} answered · ${review} review`;
+  } else {
+    el.textContent = `${done} / ${total} answered`;
+  }
+
+  updateSectionProgress();
+}
+
+function reviewStorageKey() {
+  return attempt?.id
+    ? `pariksarakshak:review:${attempt.id}`
+    : null;
+}
+
+function loadReviewMarks() {
+  reviewQuestions.clear();
+
+  const key = reviewStorageKey();
+  if (!key) return;
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "[]");
+    if (!Array.isArray(saved)) return;
+
+    const validIds = new Set(questions.map((q) => q.id));
+
+    saved.forEach((id) => {
+      if (validIds.has(id)) reviewQuestions.add(id);
+    });
+  } catch (e) {
+    console.warn("[review marks] could not restore:", e);
+  }
+}
+
+function saveReviewMarks() {
+  const key = reviewStorageKey();
+  if (!key) return;
+
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify([...reviewQuestions]),
+    );
+  } catch (e) {
+    console.warn("[review marks] could not save:", e);
+  }
+}
+
+function clearReviewMarks() {
+  const key = reviewStorageKey();
+
+  if (key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Non-critical local navigation state.
+    }
+  }
+
+  reviewQuestions.clear();
+}
+
+function toggleReview(questionId) {
+  if (reviewQuestions.has(questionId)) {
+    reviewQuestions.delete(questionId);
+  } else {
+    reviewQuestions.add(questionId);
+  }
+
+  saveReviewMarks();
+  syncReviewUI(questionId);
+  updateExamProgressSummary();
+}
+
+function syncReviewUI(questionId) {
+  const marked = reviewQuestions.has(questionId);
+
+  document
+    .getElementById(`pip-${questionId}`)
+    ?.classList.toggle("review", marked);
+
+  const btn = document.querySelector(
+    `#card-${questionId} [data-review-question="${questionId}"]`,
+  );
+
+  if (btn) {
+    btn.classList.toggle("active", marked);
+    btn.setAttribute("aria-pressed", String(marked));
+    btn.textContent =
+      marked ? "★ Marked for review" : "☆ Mark for review";
+  }
+}
+
+function scrollToQuestion(index) {
+  const q = questions[index];
+  if (!q) return;
+
+  closeFinalReview(false);
+
+  requestAnimationFrame(() => {
+    document
+      .getElementById(`card-${q.id}`)
+      ?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+
+    setCurrentQuestion(q.id);
+  });
+}
+
+function buildQuestionNav(q, index) {
+  const nav = document.createElement("div");
+  nav.className = "question-nav-footer";
+
+  const review = document.createElement("button");
+  review.type = "button";
+  review.className =
+    "btn ghost small question-review-btn" +
+    (reviewQuestions.has(q.id) ? " active" : "");
+  review.dataset.reviewQuestion = q.id;
+  review.setAttribute(
+    "aria-pressed",
+    String(reviewQuestions.has(q.id)),
+  );
+  review.textContent =
+    reviewQuestions.has(q.id)
+      ? "★ Marked for review"
+      : "☆ Mark for review";
+
+  review.onclick = () => toggleReview(q.id);
+
+  const movement = document.createElement("div");
+  movement.className = "question-move-actions";
+
+  const previous = document.createElement("button");
+  previous.type = "button";
+  previous.className = "btn ghost small";
+  previous.textContent = "← Previous";
+  previous.disabled = index === 0;
+  previous.onclick = () => scrollToQuestion(index - 1);
+
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "btn small";
+  next.textContent =
+    index === questions.length - 1
+      ? "Review paper →"
+      : "Next →";
+
+  next.onclick = async () => {
+    if (index === questions.length - 1) {
+      await showFinalReview();
+      return;
+    }
+
+    scrollToQuestion(index + 1);
+  };
+
+  movement.append(previous, next);
+  nav.append(review, movement);
+
+  return nav;
+}
+
+function installSectionProgress() {
+  const progress = document.getElementById("progress");
+  if (!progress) return;
+
+  let strip = document.getElementById("sectionProgress");
+
+  if (!strip) {
+    strip = document.createElement("div");
+    strip.id = "sectionProgress";
+    strip.className = "section-progress";
+    progress.insertAdjacentElement("afterend", strip);
+  }
+
+  updateSectionProgress();
+}
+
+function updateSectionProgress() {
+  const strip = document.getElementById("sectionProgress");
+  if (!strip) return;
+
+  const order = [];
+  const grouped = new Map();
+
+  questions.forEach((q, index) => {
+    if (!grouped.has(q.qtype)) {
+      grouped.set(q.qtype, {
+        type: q.qtype,
+        total: 0,
+        answered: 0,
+        firstIndex: index,
+      });
+      order.push(q.qtype);
+    }
+
+    const group = grouped.get(q.qtype);
+    group.total++;
+
+    if (answered[q.id]) {
+      group.answered++;
+    }
+  });
+
+  strip.innerHTML = "";
+
+  order.forEach((type) => {
+    const group = grouped.get(type);
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className =
+      "section-progress-chip" +
+      (group.answered === group.total ? " complete" : "");
+
+    button.innerHTML = `
+      <span>${escapeHtml(LABEL[type] ?? type)}</span>
+      <b>${group.answered}/${group.total}</b>
+    `;
+
+    button.onclick = () => scrollToQuestion(group.firstIndex);
+    strip.appendChild(button);
+  });
+}
+
+function closeFinalReview(result = false) {
+  const overlay = finalReviewOverlay;
+  const resolve = finalReviewResolve;
+
+  finalReviewOverlay = null;
+  finalReviewResolve = null;
+
+  overlay?.remove();
+
+  if (resolve) {
+    resolve(Boolean(result));
+  }
+}
+
+function finalReviewQuestionState(q) {
+  if (reviewQuestions.has(q.id)) return "review";
+  if (answered[q.id]) return "answered";
+  return "blank";
+}
+
+function showFinalReview() {
+  if (finalReviewOverlay) {
+    return Promise.resolve(false);
+  }
+
+  const total = questions.length;
+  const done = questions.filter((q) => Boolean(answered[q.id])).length;
+  const blank = Math.max(total - done, 0);
+  const review = reviewQuestions.size;
+  const coding = questions.filter((q) => q.qtype === "coding").length;
+
+  const overlay = document.createElement("div");
+  overlay.id = "finalReviewOverlay";
+  overlay.className = "final-review-overlay";
+
+  const panel = document.createElement("section");
+  panel.className = "final-review-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "finalReviewTitle");
+
+  panel.innerHTML = `
+    <div class="final-review-head">
+      <div>
+        <span class="eyebrow">Final check</span>
+        <h2 id="finalReviewTitle">Review before submitting</h2>
+        <p>
+          Nothing is submitted until you press
+          <b>Submit paper now</b>.
+        </p>
+      </div>
+      <button
+        type="button"
+        class="final-review-close"
+        aria-label="Close final review">×</button>
+    </div>
+
+    <div class="final-review-stats">
+      <div class="ok">
+        <b>${done}</b>
+        <span>Answered</span>
+      </div>
+      <div class="${blank ? "warn" : "ok"}">
+        <b>${blank}</b>
+        <span>Unanswered</span>
+      </div>
+      <div class="${review ? "review" : ""}">
+        <b>${review}</b>
+        <span>For review</span>
+      </div>
+      <div>
+        <b>${coding}</b>
+        <span>Coding</span>
+      </div>
+    </div>
+
+    <div class="final-review-legend">
+      <span><i class="answered"></i> Answered</span>
+      <span><i class="blank"></i> Unanswered</span>
+      <span><i class="review"></i> Marked for review</span>
+    </div>
+
+    <div class="final-review-grid" id="finalReviewGrid"></div>
+
+    ${
+      blank
+        ? `<p class="notice warn final-review-warning">
+             ${blank} question${blank === 1 ? " is" : "s are"} still unanswered.
+             You can return to the paper before submitting.
+           </p>`
+        : `<p class="notice ok final-review-warning">
+             Every question has an answer. You can still revisit anything marked for review.
+           </p>`
+    }
+
+    ${
+      coding
+        ? `<p class="final-review-coding">
+             Coding questions are automatically evaluated with visible and hidden tests during final submission.
+           </p>`
+        : ""
+    }
+
+    <div class="final-review-actions">
+      <button type="button" class="btn ghost" id="finalReviewBack">
+        Back to paper
+      </button>
+      <button type="button" class="btn danger" id="finalReviewSubmit">
+        Submit paper now
+      </button>
+    </div>
+  `;
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  const grid = panel.querySelector("#finalReviewGrid");
+
+  questions.forEach((q, index) => {
+    const button = document.createElement("button");
+    const state = finalReviewQuestionState(q);
+
+    button.type = "button";
+    button.className = `final-review-q ${state}`;
+    button.title =
+      `Question ${index + 1} · ${LABEL[q.qtype] ?? q.qtype}`;
+
+    button.innerHTML = `
+      <b>${index + 1}</b>
+      <span>${state === "review" ? "review" : state}</span>
+    `;
+
+    button.onclick = () => {
+      closeFinalReview(false);
+      scrollToQuestion(index);
+    };
+
+    grid.appendChild(button);
+  });
+
+  panel.querySelector(".final-review-close").onclick =
+    () => closeFinalReview(false);
+
+  panel.querySelector("#finalReviewBack").onclick =
+    () => closeFinalReview(false);
+
+  panel.querySelector("#finalReviewSubmit").onclick =
+    () => closeFinalReview(true);
+
+  finalReviewOverlay = overlay;
+
+  return new Promise((resolve) => {
+    finalReviewResolve = resolve;
+  });
 }
 
 function setCurrentQuestion(questionId) {
@@ -1246,26 +1642,16 @@ function startHeartbeat() {
    10 · SUBMIT
    ══════════════════════════════════════════════════════════════════════ */
 async function finish(auto) {
+  if (auto && finalReviewOverlay) {
+    closeFinalReview(false);
+  }
+
   if (finished || submissionInProgress) return;
 
   if (!auto) {
-    const left = questions.filter((q) => !answered[q.id]).length;
-    const warning = left
-      ? `${left} question${left === 1 ? " is" : "s are"} still blank.\n\n`
-      : "";
+    const confirmed = await showFinalReview();
 
-    const codingCount =
-      questions.filter((q) => q.qtype === "coding").length;
-
-    const codingNote = codingCount
-      ? `\n\nAll ${codingCount} coding question${codingCount === 1 ? "" : "s"} will be automatically submitted for marks using the latest saved code.`
-      : "";
-
-    if (
-      !confirm(
-        `${warning}Submit the paper? Answers cannot be changed after this.${codingNote}`,
-      )
-    ) {
+    if (!confirmed) {
       return;
     }
   }
@@ -1320,6 +1706,7 @@ async function finish(auto) {
     console.error("[grade_attempt]", error);
   }
 
+  clearReviewMarks();
   stopProctoring();
 
   showReceipt(
