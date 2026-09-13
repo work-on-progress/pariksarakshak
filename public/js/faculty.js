@@ -68,6 +68,303 @@ const fmt = (iso) => new Date(iso).toLocaleString([], {
 const isLive = (e) => e.is_published &&
   new Date(e.starts_at) <= new Date() && new Date() <= new Date(e.ends_at);
 
+/* ══════════════ RICH QUESTION AUTHORING V14 ══════════════ */
+const RICH_ALLOWED_TAGS = new Set([
+  "P", "BR", "STRONG", "B", "EM", "I", "U",
+  "UL", "OL", "LI", "CODE", "PRE", "BLOCKQUOTE",
+  "H3", "H4", "SUP", "SUB",
+]);
+
+function sanitizeRichHtml(value) {
+  const template = document.createElement("template");
+  template.innerHTML = String(value ?? "");
+
+  const clean = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) return;
+
+      if (child.nodeType !== Node.ELEMENT_NODE) {
+        child.remove();
+        return;
+      }
+
+      const tag = child.tagName.toUpperCase();
+
+      if (["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "MATH"].includes(tag)) {
+        child.remove();
+        return;
+      }
+
+      clean(child);
+
+      if (!RICH_ALLOWED_TAGS.has(tag)) {
+        child.replaceWith(...child.childNodes);
+        return;
+      }
+
+      [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
+    });
+  };
+
+  clean(template.content);
+  return template.innerHTML.trim();
+}
+
+function richTextFromHtml(html) {
+  const div = document.createElement("div");
+  div.innerHTML = sanitizeRichHtml(html);
+  return (div.innerText || div.textContent || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function textToRichHtml(text) {
+  const clean = escapeHtml(String(text ?? "").replace(/\r\n/g, "\n"));
+  if (!clean.trim()) return "";
+  return clean
+    .split(/\n{2,}/)
+    .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function wrapRichSelection(surface, tagName) {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount) return;
+
+  const range = sel.getRangeAt(0);
+  if (!surface.contains(range.commonAncestorContainer)) return;
+
+  const el = document.createElement(tagName);
+  try {
+    el.appendChild(range.extractContents());
+    range.insertNode(el);
+    sel.removeAllRanges();
+    const next = document.createRange();
+    next.selectNodeContents(el);
+    sel.addRange(next);
+  } catch {
+    // Ignore a browser selection edge case; content stays intact.
+  }
+}
+
+function attachRichEditor(source, { initialHtml = "", onChange = null } = {}) {
+  if (!source || source.dataset.richReady === "1") {
+    if (source && initialHtml !== undefined) setRichSource(source, initialHtml);
+    return source?._richSurface ?? null;
+  }
+
+  source.dataset.richReady = "1";
+  source.classList.add("rich-source");
+
+  const shell = document.createElement("div");
+  shell.className = "rich-editor-shell";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "rich-editor-toolbar";
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-label", "Text formatting");
+
+  const buttons = [
+    ["bold", "B", "Bold"],
+    ["italic", "I", "Italic"],
+    ["underline", "U", "Underline"],
+    ["insertUnorderedList", "• List", "Bullet list"],
+    ["insertOrderedList", "1. List", "Numbered list"],
+    ["inlineCode", "</>", "Inline code"],
+    ["formatPre", "Code", "Code block"],
+    ["formatQuote", "Quote", "Quote"],
+    ["superscript", "x²", "Superscript"],
+    ["subscript", "x₂", "Subscript"],
+    ["undo", "↶", "Undo"],
+    ["redo", "↷", "Redo"],
+    ["removeFormat", "Clear", "Clear formatting"],
+  ];
+
+  const surface = document.createElement("div");
+  surface.className = "rich-editor-surface";
+  surface.contentEditable = "true";
+  surface.spellcheck = true;
+  surface.setAttribute("role", "textbox");
+  surface.setAttribute("aria-multiline", "true");
+
+  const sync = () => {
+    const html = sanitizeRichHtml(surface.innerHTML);
+    source.dataset.richHtml = html;
+    source.value = richTextFromHtml(html);
+    onChange?.(html, source.value);
+  };
+
+  buttons.forEach(([cmd, label, title]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rich-tool";
+    button.textContent = label;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+
+    button.addEventListener("mousedown", (e) => e.preventDefault());
+    button.onclick = () => {
+      surface.focus();
+
+      if (cmd === "inlineCode") {
+        wrapRichSelection(surface, "code");
+      } else if (cmd === "formatPre") {
+        document.execCommand("formatBlock", false, "pre");
+      } else if (cmd === "formatQuote") {
+        document.execCommand("formatBlock", false, "blockquote");
+      } else {
+        document.execCommand(cmd, false, null);
+      }
+
+      sync();
+    };
+
+    toolbar.appendChild(button);
+  });
+
+  surface.addEventListener("input", sync);
+  surface.addEventListener("blur", sync);
+  surface.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    document.execCommand("insertText", false, text);
+    sync();
+  });
+
+  shell.append(toolbar, surface);
+  source.insertAdjacentElement("afterend", shell);
+  source._richSurface = surface;
+  source._richSync = sync;
+
+  setRichSource(source, initialHtml || textToRichHtml(source.value));
+  return surface;
+}
+
+function setRichSource(sourceOrId, htmlOrText = "") {
+  const source = typeof sourceOrId === "string"
+    ? document.getElementById(sourceOrId)
+    : sourceOrId;
+  if (!source) return;
+
+  const looksHtml = /<\/?[a-z][\s\S]*>/i.test(String(htmlOrText ?? ""));
+  const html = sanitizeRichHtml(
+    looksHtml ? htmlOrText : textToRichHtml(htmlOrText),
+  );
+
+  source.dataset.richHtml = html;
+  source.value = richTextFromHtml(html);
+
+  if (source._richSurface) {
+    source._richSurface.innerHTML = html;
+  }
+}
+
+function richFieldHtml(id) {
+  const source = document.getElementById(id);
+  return sanitizeRichHtml(
+    source?.dataset.richHtml || textToRichHtml(source?.value || ""),
+  );
+}
+
+function richFieldText(id) {
+  return richTextFromHtml(richFieldHtml(id));
+}
+
+function readTags(id) {
+  return (document.getElementById(id)?.value ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function showRichPreview(title, q) {
+  let dialog = document.getElementById("questionPreviewDialog");
+
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "questionPreviewDialog";
+    dialog.className = "question-preview-dialog";
+    dialog.innerHTML = `
+      <div class="panel question-preview-panel">
+        <div class="panel-head">
+          <h2 id="questionPreviewTitle">Student preview</h2>
+          <button class="btn ghost tiny" id="questionPreviewClose" style="margin-left:auto">Close</button>
+        </div>
+        <div class="panel-body" id="questionPreviewBody"></div>
+      </div>`;
+    document.body.appendChild(dialog);
+    dialog.querySelector("#questionPreviewClose").onclick = () => dialog.close();
+  }
+
+  dialog.querySelector("#questionPreviewTitle").textContent = title;
+  const body = dialog.querySelector("#questionPreviewBody");
+  body.innerHTML = "";
+
+  const prompt = document.createElement("div");
+  prompt.className = "student-preview-rich";
+  prompt.innerHTML = sanitizeRichHtml(q.prompt_html || textToRichHtml(q.prompt));
+  body.appendChild(prompt);
+
+  if (q.code_snippet) {
+    const pre = document.createElement("pre");
+    pre.className = "snippet-prev";
+    pre.textContent = q.code_snippet;
+    body.appendChild(pre);
+  }
+
+  if (q.qtype === "mcq") {
+    const opts = document.createElement("div");
+    opts.className = "student-preview-options";
+    (q.options ?? []).forEach((o) => {
+      const row = document.createElement("div");
+      row.className = "choice";
+      row.textContent = o;
+      opts.appendChild(row);
+    });
+    body.appendChild(opts);
+  }
+
+  if (q.qtype === "coding") {
+    const spec = document.createElement("div");
+    spec.className = "student-preview-code-spec";
+    [
+      ["Input format", q.input_format],
+      ["Output format", q.output_format],
+      ["Constraints", q.constraints_text],
+    ].forEach(([label, value]) => {
+      if (!value) return;
+      const block = document.createElement("div");
+      const b = document.createElement("b");
+      const pre = document.createElement("pre");
+      b.textContent = label;
+      pre.textContent = value;
+      block.append(b, pre);
+      spec.appendChild(block);
+    });
+    if (spec.childElementCount) body.appendChild(spec);
+
+    if (Array.isArray(q.preview_tests) && q.preview_tests.length) {
+      const samples = document.createElement("div");
+      samples.className = "student-preview-samples";
+      q.preview_tests.forEach((t, i) => {
+        const block = document.createElement("div");
+        block.className = "sample-test-card";
+        block.innerHTML = `<b>Sample test ${i + 1}</b><div class="test-compare"><div><span>INPUT</span><pre></pre></div><div><span>EXPECTED OUTPUT</span><pre></pre></div></div>`;
+        const pre = block.querySelectorAll("pre");
+        pre[0].textContent = t.stdin || "(no input)";
+        pre[1].textContent = t.expected_out || "(nothing)";
+        samples.appendChild(block);
+      });
+      body.appendChild(samples);
+    }
+  }
+
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+}
+
 /* ══════════════ 1 · PAPERS ══════════════ */
 function wirePapers() {
   document.getElementById("createExam").onclick = createOrUpdateExam;
@@ -549,7 +846,7 @@ function renderDraft() {
   box.innerHTML = "";
   draft.forEach((q, i) => {
     const el = document.createElement("div");
-    el.className = "qprev";
+    el.className = "qprev advanced-draft-card";
     el.dataset.type = q.qtype;
     const needsKey = q.qtype === "mcq" && !q.correct_key;
 
@@ -558,21 +855,84 @@ function renderDraft() {
         <b>Q${i + 1}</b>
         <span class="tag ${{ mcq: "blue", cloze: "warn", long: "", coding: "pass" }[q.qtype]}">${q.qtype}</span>
         ${q.qtype === "mcq" ? `<span class="tag">${KIND_LABEL[q.mcq_kind] ?? q.mcq_kind}</span>` : ""}
-        <span class="tag diff-${q.difficulty}">${q.difficulty}</span>
-        <span class="tag">${q.marks}m</span>
         ${needsKey ? `<span class="tag seal">answer missing</span>` : ""}
+        <button class="btn ghost tiny draft-preview-btn" type="button">Student preview</button>
         <button class="drop">Remove</button>
       </header>
-      <textarea rows="2" class="q-prompt"></textarea>
+
+      <div class="draft-meta-edit">
+        <label><span>Difficulty</span>
+          <select class="q-diff">
+            ${["easy", "medium", "hard"].map((d) => `<option value="${d}" ${d === (q.difficulty ?? "medium") ? "selected" : ""}>${d}</option>`).join("")}
+          </select>
+        </label>
+        <label><span>Marks</span><input class="q-marks" type="number" min="0.5" step="0.5" value="${Number(q.marks || 1)}"></label>
+        <label><span>Topic</span><input class="q-topic" value="${escapeHtml(q.topic ?? "")}"></label>
+        <label><span>Tags</span><input class="q-tags" value="${escapeHtml((q.tags ?? []).join(", "))}" placeholder="python, loops"></label>
+      </div>
+
+      <label class="field draft-rich-field"><span>Question</span>
+        <textarea rows="3" class="q-prompt"></textarea>
+      </label>
+
       ${q.code_snippet ? `<pre class="snippet-prev"></pre>` : ""}
       <div class="opts"></div>
-      ${q.qtype === "cloze" ? `<p class="answer">Answers: ${escapeHtml((q.cloze_answers ?? []).join(", ") || "(set these before saving)")}</p>` : ""}
-      ${q.qtype === "coding" ? `<p class="tests">${(q.test_cases ?? []).length} tests · ${(q.test_cases ?? []).filter((t) => !t.is_hidden).length} shown to students</p>` : ""}
-      ${q.explanation ? `<p class="why">${escapeHtml(q.explanation)}</p>` : ""}`;
 
-    const ta = el.querySelector(".q-prompt");
-    ta.value = q.prompt;
-    ta.oninput = () => { q.prompt = ta.value; };
+      ${q.qtype === "cloze" ? `
+        <label class="field"><span>Answers in order · separated by |</span>
+          <input class="q-cloze" value="${escapeHtml((q.cloze_answers ?? []).join(" | "))}">
+        </label>` : ""}
+
+      ${q.qtype === "coding" ? `
+        <div class="draft-coding-grid">
+          <label class="field"><span>Input format</span><textarea class="q-input-format" rows="3"></textarea></label>
+          <label class="field"><span>Output format</span><textarea class="q-output-format" rows="3"></textarea></label>
+        </div>
+        <label class="field"><span>Constraints</span><textarea class="q-constraints" rows="2"></textarea></label>
+        <label class="field"><span>Starter code</span><textarea class="q-starter mono-input" rows="5"></textarea></label>
+        <label class="field"><span>Reference solution / code answer (optional · faculty only)</span>
+          <textarea class="q-reference-solution mono-input" rows="8"></textarea>
+        </label>
+        <p class="tests">${(q.test_cases ?? []).length} tests · the server will randomly expose 1–2 as samples when saved.</p>` : ""}
+
+      ${q.qtype === "long" ? `
+        <label class="field draft-rich-field"><span>Reference answer (optional · faculty only)</span>
+          <textarea class="q-reference-answer" rows="5"></textarea>
+        </label>
+        <label class="field draft-rich-field"><span>Marking rubric (optional · faculty only)</span>
+          <textarea class="q-rubric" rows="4"></textarea>
+        </label>` : ""}
+
+      <label class="field draft-rich-field"><span>Why the answer is right (optional)</span>
+        <textarea class="q-explanation" rows="4"></textarea>
+      </label>`;
+
+    const promptTa = el.querySelector(".q-prompt");
+    promptTa.value = q.prompt ?? "";
+    attachRichEditor(promptTa, {
+      initialHtml: q.prompt_html || textToRichHtml(q.prompt ?? ""),
+      onChange: (html, text) => {
+        q.prompt_html = html;
+        q.prompt = text;
+      },
+    });
+
+    const explainTa = el.querySelector(".q-explanation");
+    explainTa.value = q.explanation ?? "";
+    attachRichEditor(explainTa, {
+      initialHtml: q.explanation_html || textToRichHtml(q.explanation ?? ""),
+      onChange: (html, text) => {
+        q.explanation_html = html;
+        q.explanation = text;
+      },
+    });
+
+    el.querySelector(".q-diff").onchange = (e) => { q.difficulty = e.target.value; };
+    el.querySelector(".q-marks").oninput = (e) => { q.marks = Math.max(.5, Number(e.target.value) || 1); };
+    el.querySelector(".q-topic").oninput = (e) => { q.topic = e.target.value; };
+    el.querySelector(".q-tags").oninput = (e) => {
+      q.tags = e.target.value.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 20);
+    };
 
     if (q.code_snippet) el.querySelector(".snippet-prev").textContent = q.code_snippet;
 
@@ -582,15 +942,70 @@ function renderDraft() {
         const letter = String.fromCharCode(65 + idx);
         const row = document.createElement("label");
         row.className = "opt-row" + (q.correct_key === letter ? " correct" : "");
-        row.innerHTML = `<input type="radio" name="key-${i}" ${q.correct_key === letter ? "checked" : ""}>
-                         <span>${escapeHtml(opt)}</span>`;
-        row.querySelector("input").onchange = () => {
+
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = `key-${i}`;
+        radio.checked = q.correct_key === letter;
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "draft-option-edit";
+        input.value = String(opt ?? "").replace(/^\s*[A-D][.)]\s*/i, "");
+
+        radio.onchange = () => {
           q.correct_key = letter;
-          renderDraft();
+          opts.querySelectorAll(".opt-row").forEach((r) => r.classList.remove("correct"));
+          row.classList.add("correct");
         };
+        input.oninput = () => { q.options[idx] = input.value; };
+
+        row.append(radio, document.createTextNode(`${letter}. `), input);
         opts.appendChild(row);
       });
     }
+
+    if (q.qtype === "cloze") {
+      el.querySelector(".q-cloze").oninput = (e) => {
+        q.cloze_answers = e.target.value.split("|").map((s) => s.trim()).filter(Boolean);
+      };
+    }
+
+    if (q.qtype === "coding") {
+      const bind = (selector, key, value = "") => {
+        const control = el.querySelector(selector);
+        control.value = q[key] ?? value;
+        control.oninput = () => { q[key] = control.value; };
+      };
+      bind(".q-input-format", "input_format");
+      bind(".q-output-format", "output_format");
+      bind(".q-constraints", "constraints_text");
+      bind(".q-starter", "starter_code");
+      bind(".q-reference-solution", "reference_solution");
+    }
+
+    if (q.qtype === "long") {
+      const refTa = el.querySelector(".q-reference-answer");
+      attachRichEditor(refTa, {
+        initialHtml: q.reference_answer_html || textToRichHtml(q.reference_answer ?? ""),
+        onChange: (html, text) => {
+          q.reference_answer_html = html;
+          q.reference_answer = text;
+        },
+      });
+
+      const rubTa = el.querySelector(".q-rubric");
+      attachRichEditor(rubTa, {
+        initialHtml: q.marking_rubric_html || textToRichHtml(q.marking_rubric ?? ""),
+        onChange: (html, text) => {
+          q.marking_rubric_html = html;
+          q.marking_rubric = text;
+        },
+      });
+    }
+
+    el.querySelector(".draft-preview-btn").onclick = () =>
+      showRichPreview(`Question ${i + 1} · student preview`, q);
 
     el.querySelector(".drop").onclick = () => { draft.splice(i, 1); renderDraft(); };
     box.appendChild(el);
@@ -598,23 +1013,18 @@ function renderDraft() {
 }
 
 function normaliseGeneratedTests(testCases) {
-  const tests = Array.isArray(testCases)
+  return Array.isArray(testCases)
     ? testCases
       .filter((t) => t && String(t.expected_out ?? "") !== "")
       .map((t, i) => ({
         stdin: String(t.stdin ?? ""),
         expected_out: String(t.expected_out ?? ""),
-        is_hidden: t.is_hidden !== false,
+        // Everything is inserted hidden. Migration 012 exposes a random 1–2
+        // AFTER the rows exist, so hidden tests never need to reach students.
+        is_hidden: true,
         position: i + 1,
       }))
     : [];
-
-  // A generated coding question must have examples. If Gemini marked every
-  // case hidden, expose the first two so Run visible tests is useful.
-  if (tests.length && !tests.some((t) => !t.is_hidden)) {
-    tests.slice(0, Math.min(2, tests.length)).forEach((t) => { t.is_hidden = false; });
-  }
-  return tests;
 }
 
 async function saveDraft() {
@@ -645,17 +1055,33 @@ async function saveDraft() {
   for (const q of draft) {
     const { data: row, error } = await supabase.from("questions").insert({
       exam_id, qtype: q.qtype, position: position++,
-      marks: q.marks, prompt: q.prompt,
+      marks: q.marks,
+      prompt: q.prompt,
+      prompt_html: q.prompt_html || null,
       difficulty: q.difficulty ?? "medium",
       mcq_kind: q.qtype === "mcq" ? (q.mcq_kind ?? "theory") : "theory",
       code_snippet: q.code_snippet || null,
       explanation: q.explanation || null,
+      explanation_html: q.explanation_html || (q.explanation ? textToRichHtml(q.explanation) : null),
       options: q.options?.length ? q.options : null,
       correct_key: q.correct_key || null,
       cloze_answers: q.cloze_answers?.length ? q.cloze_answers : null,
       language: q.language || null,
       func_signature: q.func_signature || null,
       starter_code: q.starter_code || null,
+      input_format: q.qtype === "coding" ? (q.input_format || null) : null,
+      output_format: q.qtype === "coding" ? (q.output_format || null) : null,
+      constraints_text: q.qtype === "coding" ? (q.constraints_text || null) : null,
+      reference_solution: q.qtype === "coding" ? (q.reference_solution || null) : null,
+      reference_answer: q.qtype === "long" ? (q.reference_answer || null) : null,
+      reference_answer_html: q.qtype === "long" ? (q.reference_answer_html || (q.reference_answer ? textToRichHtml(q.reference_answer) : null)) : null,
+      marking_rubric: q.qtype === "long" ? (q.marking_rubric || null) : null,
+      marking_rubric_html: q.qtype === "long" ? (q.marking_rubric_html || (q.marking_rubric ? textToRichHtml(q.marking_rubric) : null)) : null,
+      topic: q.topic || null,
+      subtopic: q.subtopic || null,
+      bloom_level: q.bloom_level || null,
+      estimated_minutes: Number(q.estimated_minutes) || null,
+      tags: Array.isArray(q.tags) ? q.tags.slice(0, 20) : [],
     }).select("id").single();
 
     if (error) {
@@ -678,6 +1104,18 @@ async function saveDraft() {
         btn.disabled = false; btn.textContent = "Save to paper";
         return note("genMsg",
           `Stopped after ${saved} questions: coding test cases could not be saved — ${escapeHtml(testError.message)}`,
+          "error");
+      }
+
+      const { error: sampleError } = await supabase.rpc(
+        "randomize_visible_test_cases",
+        { p_question_id: row.id },
+      );
+      if (sampleError) {
+        await supabase.from("questions").delete().eq("id", row.id);
+        btn.disabled = false; btn.textContent = "Save to paper";
+        return note("genMsg",
+          `Stopped after ${saved} questions: sample tests could not be selected — ${escapeHtml(sampleError.message)}. Run migration 012 first.`,
           "error");
       }
     }
@@ -703,7 +1141,14 @@ function wireManual() {
   document.getElementById("mKind").onchange = switchManualType;
   document.getElementById("addTest").onclick = () => addTestRow();
   document.getElementById("mSave").onclick = saveManual;
+  document.getElementById("mPreview").onclick = previewManualQuestion;
   document.getElementById("mCancel").onclick = resetManualForm;
+
+  attachRichEditor(document.getElementById("mPrompt"));
+  attachRichEditor(document.getElementById("mExplain"));
+  attachRichEditor(document.getElementById("mReferenceAnswer"));
+  attachRichEditor(document.getElementById("mRubric"));
+
   switchManualType();
   addTestRow("", "", false);
   addTestRow("", "", true);
@@ -715,6 +1160,7 @@ function switchManualType() {
   document.getElementById("mMcqBox").classList.toggle("hidden", t !== "mcq");
   document.getElementById("mKindBox").classList.toggle("hidden", t !== "mcq");
   document.getElementById("mClozeBox").classList.toggle("hidden", t !== "cloze");
+  document.getElementById("mLongBox").classList.toggle("hidden", t !== "long");
   document.getElementById("mCodingBox").classList.toggle("hidden", t !== "coding");
   document.getElementById("mSnippetBox").classList.toggle(
     "hidden", !(t === "mcq" && kind !== "theory"));
@@ -726,11 +1172,8 @@ function switchManualType() {
 
 function addTestRow(stdin = "", expected = "", hidden = true) {
   const row = document.createElement("div");
-  row.className = "testrow";
+  row.className = "testrow advanced-testrow";
 
-  // Multiline coding test cases:
-  // Every line is preserved exactly when saved to test_cases.stdin /
-  // test_cases.expected_out and later sent to Judge0.
   const input = document.createElement("textarea");
   input.className = "t-in";
   input.rows = 3;
@@ -743,30 +1186,88 @@ function addTestRow(stdin = "", expected = "", hidden = true) {
   output.placeholder = "expected output — preserve line breaks";
   output.value = String(expected ?? "");
 
-  const hiddenLabel = document.createElement("label");
-  const hiddenBox = document.createElement("input");
-  hiddenBox.type = "checkbox";
-  hiddenBox.className = "t-hidden";
-  hiddenBox.checked = Boolean(hidden);
-  hiddenLabel.append(hiddenBox, document.createTextNode(" hidden"));
+  const sample = document.createElement("span");
+  sample.className = `test-sample-state ${hidden ? "" : "visible"}`;
+  sample.textContent = hidden ? "hidden test" : "current sample";
+  sample.title = "Migration 012 will randomly choose 1–2 samples again when you save.";
+
+  const tools = document.createElement("div");
+  tools.className = "testrow-tools";
+
+  const up = document.createElement("button");
+  up.className = "btn ghost tiny";
+  up.type = "button";
+  up.textContent = "↑";
+  up.title = "Move up";
+  up.onclick = () => {
+    const prev = row.previousElementSibling;
+    if (prev) row.parentElement.insertBefore(row, prev);
+  };
+
+  const down = document.createElement("button");
+  down.className = "btn ghost tiny";
+  down.type = "button";
+  down.textContent = "↓";
+  down.title = "Move down";
+  down.onclick = () => {
+    const next = row.nextElementSibling;
+    if (next) row.parentElement.insertBefore(next, row);
+  };
+
+  const duplicate = document.createElement("button");
+  duplicate.className = "btn ghost tiny";
+  duplicate.type = "button";
+  duplicate.textContent = "Duplicate";
+  duplicate.onclick = () => addTestRow(input.value, output.value, true);
 
   const removeBtn = document.createElement("button");
   removeBtn.className = "btn ghost tiny";
   removeBtn.type = "button";
-  removeBtn.textContent = "×";
+  removeBtn.textContent = "Delete";
   removeBtn.onclick = () => row.remove();
 
-  row.append(input, output, hiddenLabel, removeBtn);
+  tools.append(up, down, duplicate, removeBtn);
+  row.append(input, output, sample, tools);
   document.getElementById("mTests").appendChild(row);
 }
 
 function readTestRows() {
-  return [...document.querySelectorAll("#mTests .testrow")].map((r, i) => ({
-    stdin: r.querySelector(".t-in").value,
-    expected_out: r.querySelector(".t-out").value,
-    is_hidden: r.querySelector(".t-hidden").checked,
-    position: i + 1,
-  })).filter((t) => t.expected_out !== "");
+  return [...document.querySelectorAll("#mTests .testrow")]
+    .map((r, i) => ({
+      stdin: r.querySelector(".t-in").value,
+      expected_out: r.querySelector(".t-out").value,
+      // Save every row hidden first. The database randomly exposes 1–2 after insert.
+      is_hidden: true,
+      position: i + 1,
+    }))
+    .filter((t) => t.expected_out !== "");
+}
+
+function manualQuestionObject() {
+  const qtype = val("mType");
+  const prompt = richFieldText("mPrompt");
+  const options = qtype === "mcq"
+    ? ["A", "B", "C", "D"]
+        .map((L) => val("mOpt" + L))
+        .filter(Boolean)
+    : [];
+
+  return {
+    qtype,
+    prompt,
+    prompt_html: richFieldHtml("mPrompt"),
+    options,
+    code_snippet: val("mSnippet"),
+    input_format: document.getElementById("mInputFormat")?.value ?? "",
+    output_format: document.getElementById("mOutputFormat")?.value ?? "",
+    constraints_text: document.getElementById("mConstraints")?.value ?? "",
+  };
+}
+
+function previewManualQuestion() {
+  const q = manualQuestionObject();
+  if (!q.prompt) return note("mMsg", "Write the question first.", "warn");
+  showRichPreview("Manual question · student preview", q);
 }
 
 async function saveManual() {
@@ -774,16 +1275,39 @@ async function saveManual() {
   if (!exam_id) return note("mMsg", "Pick a paper at the top first.", "error");
 
   const qtype = val("mType");
-  const prompt = val("mPrompt");
+  const prompt = richFieldText("mPrompt");
   if (!prompt) return note("mMsg", "Write the question first.", "error");
 
+  const estimated = Number(val("mEstimated"));
   const row = {
-    exam_id, qtype, marks: Number(val("mMarks")) || 1, prompt,
+    exam_id,
+    qtype,
+    marks: Number(val("mMarks")) || 1,
+    prompt,
+    prompt_html: richFieldHtml("mPrompt") || null,
     difficulty: val("mDiff"),
     mcq_kind: qtype === "mcq" ? val("mKind") : "theory",
-    code_snippet: null, explanation: val("mExplain") || null,
-    options: null, correct_key: null, cloze_answers: null,
-    language: null, starter_code: null,
+    code_snippet: null,
+    explanation: richFieldText("mExplain") || null,
+    explanation_html: richFieldHtml("mExplain") || null,
+    options: null,
+    correct_key: null,
+    cloze_answers: null,
+    language: null,
+    starter_code: null,
+    input_format: null,
+    output_format: null,
+    constraints_text: null,
+    reference_solution: null,
+    reference_answer: qtype === "long" ? (richFieldText("mReferenceAnswer") || null) : null,
+    reference_answer_html: qtype === "long" ? (richFieldHtml("mReferenceAnswer") || null) : null,
+    marking_rubric: qtype === "long" ? (richFieldText("mRubric") || null) : null,
+    marking_rubric_html: qtype === "long" ? (richFieldHtml("mRubric") || null) : null,
+    topic: val("mTopic") || null,
+    subtopic: val("mSubtopic") || null,
+    bloom_level: val("mBloom") || null,
+    estimated_minutes: Number.isFinite(estimated) && estimated > 0 ? estimated : null,
+    tags: readTags("mTags"),
   };
 
   if (qtype === "mcq") {
@@ -816,24 +1340,53 @@ async function saveManual() {
   if (qtype === "coding") {
     row.language = val("mLang");
     row.starter_code = document.getElementById("mStarter").value;
+    row.input_format = document.getElementById("mInputFormat").value.trim() || null;
+    row.output_format = document.getElementById("mOutputFormat").value.trim() || null;
+    row.constraints_text = document.getElementById("mConstraints").value.trim() || null;
+    row.reference_solution = document.getElementById("mReferenceSolution").value || null;
     tests = readTestRows();
-    if (tests.length < 2) return note("mMsg", "Add at least two test cases with an expected output.", "error");
-    if (!tests.some((t) => !t.is_hidden)) {
-      return note("mMsg", "Leave at least one test visible so students see the format.", "error");
+    if (tests.length < 2) {
+      return note("mMsg", "Add at least two test cases with an expected output.", "error");
     }
   }
 
   if (editingQuestionId) {
     const { error } = await supabase.from("questions").update(row).eq("id", editingQuestionId);
     if (error) return note("mMsg", escapeHtml(error.message), "error");
+
+    if (qtype !== "coding") {
+      const { error: staleTestError } = await supabase
+        .from("test_cases")
+        .delete()
+        .eq("question_id", editingQuestionId);
+
+      if (staleTestError) {
+        return note(
+          "mMsg",
+          `Question updated, but old coding tests could not be removed: ${escapeHtml(staleTestError.message)}`,
+          "error",
+        );
+      }
+    }
+
     if (qtype === "coding") {
       const { error: delTestError } = await supabase.from("test_cases").delete().eq("question_id", editingQuestionId);
       if (delTestError) return note("mMsg", `Could not replace test cases: ${escapeHtml(delTestError.message)}`, "error");
       const { error: addTestError } = await supabase.from("test_cases")
         .insert(tests.map((t) => ({ ...t, question_id: editingQuestionId })));
       if (addTestError) return note("mMsg", `Could not save test cases: ${escapeHtml(addTestError.message)}`, "error");
+
+      const { data: visibleCount, error: sampleError } = await supabase.rpc(
+        "randomize_visible_test_cases",
+        { p_question_id: editingQuestionId },
+      );
+      if (sampleError) {
+        return note("mMsg", `Question saved, but sample tests could not be selected: ${escapeHtml(sampleError.message)}. Run migration 012.`, "error");
+      }
+      note("mMsg", `Question updated · ${visibleCount} random sample test${visibleCount === 1 ? "" : "s"} visible.`, "ok");
+    } else {
+      note("mMsg", "Question updated.", "ok");
     }
-    note("mMsg", "Question updated.", "ok");
   } else {
     row.position = await nextPosition(exam_id);
     const { data, error } = await supabase.from("questions").insert(row).select("id").single();
@@ -845,8 +1398,19 @@ async function saveManual() {
         await supabase.from("questions").delete().eq("id", data.id);
         return note("mMsg", `Could not save test cases: ${escapeHtml(addTestError.message)}`, "error");
       }
+
+      const { data: visibleCount, error: sampleError } = await supabase.rpc(
+        "randomize_visible_test_cases",
+        { p_question_id: data.id },
+      );
+      if (sampleError) {
+        await supabase.from("questions").delete().eq("id", data.id);
+        return note("mMsg", `Could not select sample tests: ${escapeHtml(sampleError.message)}. Run migration 012 first.`, "error");
+      }
+      note("mMsg", `Question added · ${visibleCount} random sample test${visibleCount === 1 ? "" : "s"} visible to students.`, "ok");
+    } else {
+      note("mMsg", "Question added to the paper.", "ok");
     }
-    note("mMsg", "Question added to the paper.", "ok");
   }
 
   resetManualForm();
@@ -858,8 +1422,21 @@ function resetManualForm() {
   document.getElementById("manualHead").textContent = "Write one by hand";
   document.getElementById("mSave").textContent = "Add to paper";
   document.getElementById("mCancel").classList.add("hidden");
-  ["mPrompt", "mOptA", "mOptB", "mOptC", "mOptD", "mCloze", "mStarter", "mSnippet", "mExplain"]
-    .forEach((id) => (document.getElementById(id).value = ""));
+  [
+    "mOptA", "mOptB", "mOptC", "mOptD", "mCloze", "mStarter", "mSnippet",
+    "mInputFormat", "mOutputFormat", "mConstraints", "mReferenceSolution",
+    "mTopic", "mSubtopic", "mTags", "mEstimated",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+
+  document.getElementById("mBloom").value = "";
+  setRichSource("mPrompt", "");
+  setRichSource("mExplain", "");
+  setRichSource("mReferenceAnswer", "");
+  setRichSource("mRubric", "");
+
   document.getElementById("mTests").innerHTML = "";
   addTestRow("", "", false);
   addTestRow("", "", true);
@@ -929,12 +1506,44 @@ async function loadQuestions() {
           <span class="when">${q.difficulty ?? "medium"} · ${q.marks} marks${
             q.qtype === "mcq" && q.mcq_kind !== "theory" ? ` · ${KIND_LABEL[q.mcq_kind] ?? q.mcq_kind}` : ""}${codingMeta}</span>
         </span>
-        <span class="tools" style="margin-left:auto;display:flex;gap:.3rem">
+        <span class="tools" style="margin-left:auto;display:flex;gap:.3rem;flex-wrap:wrap">
+          <button class="btn ghost tiny" data-preview-q="${q.id}">Preview</button>
+          <button class="btn ghost tiny" data-duplicate-q="${q.id}">Duplicate</button>
           <button class="btn ghost tiny" data-edit="${q.id}">Edit</button>
           <button class="btn ghost tiny" data-qdel="${q.id}">Delete</button>
         </span>
       </div>`;
   }).join("");
+
+  box.querySelectorAll("[data-preview-q]").forEach((b) => {
+    b.onclick = async () => {
+      const q = qs.find((x) => x.id === b.dataset.previewQ);
+      if (!q) return;
+
+      if (q.qtype === "coding") {
+        const { data: tests } = await supabase.from("test_cases")
+          .select("stdin, expected_out, is_hidden, position")
+          .eq("question_id", q.id)
+          .eq("is_hidden", false)
+          .order("position");
+        showRichPreview("Student preview", {
+          ...q,
+          preview_tests: tests ?? [],
+        });
+        return;
+      }
+
+      showRichPreview("Student preview", q);
+    };
+  });
+
+  box.querySelectorAll("[data-duplicate-q]").forEach((b) => {
+    b.onclick = async () => {
+      const q = qs.find((x) => x.id === b.dataset.duplicateQ);
+      if (!q) return;
+      await duplicateQuestion(q);
+    };
+  });
 
   box.querySelectorAll("[data-edit]").forEach((b) => {
     b.onclick = () => editQuestion(qs.find((q) => q.id === b.dataset.edit));
@@ -949,6 +1558,67 @@ async function loadQuestions() {
   });
 }
 
+async function duplicateQuestion(q) {
+  const exam_id = val("examSelect");
+  if (!exam_id || !q) return;
+
+  if (!confirm("Duplicate this question at the end of the current paper?")) return;
+
+  const {
+    id: _id,
+    created_at: _created,
+    ...copy
+  } = q;
+
+  copy.exam_id = exam_id;
+  copy.position = await nextPosition(exam_id);
+
+  const { data: inserted, error } = await supabase
+    .from("questions")
+    .insert(copy)
+    .select("id")
+    .single();
+
+  if (error) return alert(`Could not duplicate question: ${error.message}`);
+
+  if (q.qtype === "coding") {
+    const { data: tests, error: testReadError } = await supabase
+      .from("test_cases")
+      .select("stdin, expected_out, position")
+      .eq("question_id", q.id)
+      .order("position");
+
+    if (testReadError) return alert(`Question duplicated, but tests could not be read: ${testReadError.message}`);
+
+    if (tests?.length) {
+      const { error: testWriteError } = await supabase
+        .from("test_cases")
+        .insert(tests.map((t, i) => ({
+          question_id: inserted.id,
+          stdin: t.stdin,
+          expected_out: t.expected_out,
+          is_hidden: true,
+          position: t.position ?? i + 1,
+        })));
+
+      if (testWriteError) {
+        await supabase.from("questions").delete().eq("id", inserted.id);
+        return alert(`Could not duplicate coding tests: ${testWriteError.message}`);
+      }
+
+      const { error: sampleError } = await supabase.rpc(
+        "randomize_visible_test_cases",
+        { p_question_id: inserted.id },
+      );
+      if (sampleError) {
+        return alert(`Question duplicated, but sample tests could not be selected: ${sampleError.message}`);
+      }
+    }
+  }
+
+  loadQuestions();
+}
+
 async function editQuestion(q) {
   editingQuestionId = q.id;
   document.getElementById("manualHead").textContent = "Editing a question";
@@ -959,9 +1629,16 @@ async function editQuestion(q) {
   document.getElementById("mDiff").value = q.difficulty ?? "medium";
   document.getElementById("mKind").value = q.mcq_kind ?? "theory";
   document.getElementById("mMarks").value = q.marks;
-  document.getElementById("mPrompt").value = q.prompt;
+  setRichSource("mPrompt", q.prompt_html || q.prompt || "");
   document.getElementById("mSnippet").value = q.code_snippet ?? "";
-  document.getElementById("mExplain").value = q.explanation ?? "";
+  setRichSource("mExplain", q.explanation_html || q.explanation || "");
+  document.getElementById("mTopic").value = q.topic ?? "";
+  document.getElementById("mSubtopic").value = q.subtopic ?? "";
+  document.getElementById("mBloom").value = q.bloom_level ?? "";
+  document.getElementById("mTags").value = Array.isArray(q.tags) ? q.tags.join(", ") : "";
+  document.getElementById("mEstimated").value = q.estimated_minutes ?? "";
+  setRichSource("mReferenceAnswer", q.reference_answer_html || q.reference_answer || "");
+  setRichSource("mRubric", q.marking_rubric_html || q.marking_rubric || "");
   switchManualType();
 
   if (q.qtype === "mcq") {
@@ -977,12 +1654,16 @@ async function editQuestion(q) {
   if (q.qtype === "coding") {
     document.getElementById("mLang").value = q.language ?? "python";
     document.getElementById("mStarter").value = q.starter_code ?? "";
+    document.getElementById("mInputFormat").value = q.input_format ?? "";
+    document.getElementById("mOutputFormat").value = q.output_format ?? "";
+    document.getElementById("mConstraints").value = q.constraints_text ?? "";
+    document.getElementById("mReferenceSolution").value = q.reference_solution ?? "";
     const { data: tests } = await supabase.from("test_cases")
       .select("*").eq("question_id", q.id).order("position");
     document.getElementById("mTests").innerHTML = "";
     (tests ?? []).forEach((t) => addTestRow(t.stdin, t.expected_out, t.is_hidden));
   }
-  document.getElementById("mPrompt").scrollIntoView({ behavior: "smooth", block: "center" });
+  document.getElementById("mPrompt").parentElement.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 /* ══════════════ 4 · STUDENTS ══════════════ */
