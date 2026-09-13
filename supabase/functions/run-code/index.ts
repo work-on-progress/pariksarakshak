@@ -37,6 +37,10 @@ const POLL_MS =
 const MAX_POLLS =
   Number(Deno.env.get("JUDGE0_MAX_POLLS") ?? 24);
 
+// AUTO_CODING_FINALIZATION_V1
+const FINALIZE_GRACE_MS =
+  Number(Deno.env.get("CODE_FINALIZE_GRACE_MS") ?? 45000);
+
 // Stable Judge0 CE language IDs.
 // Python is the important one for tomorrow's exam.
 const LANGUAGE_ID: Record<string, number> = {
@@ -121,27 +125,34 @@ Deno.serve(async (req) => {
     const {
       attempt_id,
       question_id,
-      code,
+      code: suppliedCode,
       mode = "run",
     } = body;
 
-    if (!attempt_id || !question_id || typeof code !== "string") {
+    if (!attempt_id || !question_id) {
       return json(
-        { error: "Missing attempt, question or code." },
+        { error: "Missing attempt or question." },
         400,
       );
     }
 
-    if (!code.trim()) {
-      return json({ error: "Write some code first." }, 400);
-    }
-
-    if (code.length > 50_000) {
-      return json({ error: "That submission is too long." }, 400);
-    }
-
-    if (!["run", "submit"].includes(mode)) {
+    if (!["run", "submit", "finalize"].includes(mode)) {
       return json({ error: "Unknown run mode." }, 400);
+    }
+
+    let code =
+      typeof suppliedCode === "string"
+        ? suppliedCode
+        : "";
+
+    if (mode !== "finalize") {
+      if (!code.trim()) {
+        return json({ error: "Write some code first." }, 400);
+      }
+
+      if (code.length > 50_000) {
+        return json({ error: "That submission is too long." }, 400);
+      }
     }
 
     const admin = createClient(
@@ -196,10 +207,16 @@ Deno.serve(async (req) => {
     }
 
     if (now > hardEnd) {
-      return json(
-        { error: "Your time for this paper is over." },
-        403,
-      );
+      const withinFinalizeGrace =
+        mode === "finalize" &&
+        now <= hardEnd + FINALIZE_GRACE_MS;
+
+      if (!withinFinalizeGrace) {
+        return json(
+          { error: "Your time for this paper is over." },
+          403,
+        );
+      }
     }
 
     // ------------------------------------------------------------
@@ -227,6 +244,38 @@ Deno.serve(async (req) => {
     if (!languageId) {
       return json(
         { error: `Language not supported: ${language}` },
+        400,
+      );
+    }
+
+    if (mode === "finalize") {
+      const {
+        data: savedAnswer,
+        error: savedCodeErr,
+      } = await admin
+        .from("answers")
+        .select("code_submitted")
+        .eq("attempt_id", attempt_id)
+        .eq("question_id", question_id)
+        .maybeSingle();
+
+      if (savedCodeErr) {
+        return json(
+          {
+            error:
+              `Could not read the saved coding answer: ${savedCodeErr.message}`,
+          },
+          500,
+        );
+      }
+
+      code =
+        String(savedAnswer?.code_submitted ?? "");
+    }
+
+    if (code.length > 50_000) {
+      return json(
+        { error: "That submission is too long." },
         400,
       );
     }
@@ -272,6 +321,53 @@ Deno.serve(async (req) => {
         },
         400,
       );
+    }
+
+    if (!code.trim()) {
+      if (mode !== "finalize") {
+        return json(
+          { error: "Write some code first." },
+          400,
+        );
+      }
+
+      const { error: blankSaveErr } =
+        await admin
+          .from("answers")
+          .upsert(
+            {
+              attempt_id,
+              question_id,
+              code_submitted: "",
+              passed_tests: 0,
+              total_tests: tests.length,
+              auto_marks: 0,
+              updated_at:
+                new Date().toISOString(),
+            },
+            {
+              onConflict: "attempt_id,question_id",
+            },
+          );
+
+      if (blankSaveErr) {
+        return json(
+          {
+            error:
+              `The blank coding result could not be recorded: ${blankSaveErr.message}`,
+          },
+          500,
+        );
+      }
+
+      return json({
+        mode,
+        passed: 0,
+        total: tests.length,
+        all_passed: false,
+        results: [],
+        blank_code: true,
+      });
     }
 
     // ------------------------------------------------------------
@@ -349,7 +445,7 @@ Deno.serve(async (req) => {
     // ------------------------------------------------------------
     // Only full submission writes marks
     // ------------------------------------------------------------
-    if (mode === "submit") {
+    if (mode === "submit" || mode === "finalize") {
       const allPassed =
         passed === tests.length;
 
