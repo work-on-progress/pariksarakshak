@@ -147,6 +147,23 @@ const geminiQuestionSchema = {
           language: { type: "STRING" },
           func_signature: { type: "STRING" },
           starter_code: { type: "STRING" },
+          input_format: { type: "STRING" },
+          output_format: { type: "STRING" },
+          constraints_text: { type: "STRING" },
+          reference_solution: { type: "STRING" },
+          reference_answer: { type: "STRING" },
+          marking_rubric: { type: "STRING" },
+          topic: { type: "STRING" },
+          subtopic: { type: "STRING" },
+          bloom_level: {
+            type: "STRING",
+            enum: ["", "remember", "understand", "apply", "analyze", "evaluate", "create"],
+          },
+          estimated_minutes: { type: "NUMBER" },
+          tags: {
+            type: "ARRAY",
+            items: { type: "STRING" },
+          },
           answer_basis: {
             type: "STRING",
             enum: ["generated", "explicit", "inferred", "unknown"],
@@ -178,6 +195,17 @@ const geminiQuestionSchema = {
           "language",
           "func_signature",
           "starter_code",
+          "input_format",
+          "output_format",
+          "constraints_text",
+          "reference_solution",
+          "reference_answer",
+          "marking_rubric",
+          "topic",
+          "subtopic",
+          "bloom_level",
+          "estimated_minutes",
+          "tags",
           "answer_basis",
           "test_cases",
         ],
@@ -1268,8 +1296,7 @@ ${q.starter_code || "(none)"}
 Create EXACTLY 6 correct stdin/stdout tests.
 
 Rules:
-- Test 1-4: is_hidden=false
-- Test 5-6: is_hidden=true
+- Set is_hidden=true for all 6 tests. The platform randomly exposes 1–2 samples after the teacher saves the question.
 - Inputs must follow the stated input format.
 - expected_out must exactly match the required output.
 - Use varied normal and edge cases.
@@ -1374,6 +1401,7 @@ STRICT RULES:
 GENERAL
 - Do not repeat the same question or merely change numbers.
 - Every question must have a meaningful explanation/answer rationale.
+- explanation should be easy to read across 2-6 short lines when useful. Use newline characters for separate reasoning points; do not return HTML.
 - Put the answer in answer fields only. NEVER reveal the answer inside the prompt.
 - answer_basis="generated" for all generated questions.
 - Return exactly the requested number and mix.
@@ -1394,15 +1422,20 @@ CLOZE
 
 LONG
 - Do not put a model answer in prompt.
-- explanation may contain a short marking guide / expected points.
+- reference_answer should contain an optional model answer suitable for faculty marking.
+- marking_rubric should contain concise point/mark guidance.
+- explanation may contain a short rationale / expected points.
 
 CODING
 - Language: ${language}.
-- Include Task, Input format, Output format and at least one worked example in prompt.
+- Keep prompt focused on the task itself.
+- Put the structured input description in input_format.
+- Put the structured output description in output_format.
+- Put limits/constraints in constraints_text.
 - starter_code may parse input and include TODO comments, but MUST NOT contain the completed solution.
+- reference_solution MUST contain a correct complete solution in ${language}. It is faculty-only and is never sent to students during the active exam.
 - test_cases MUST contain exactly 6 valid tests.
-- Test 1-4: is_hidden=false.
-- Test 5-6: is_hidden=true.
+- Set is_hidden=true for all generated tests. The platform randomly exposes 1-2 after the teacher saves the question.
 - expected_out must be exact.
 - options=[], correct_key="", cloze_answers=[].
 
@@ -1426,6 +1459,17 @@ RETURN ONLY THIS JSON SHAPE:
       "language": "",
       "func_signature": "",
       "starter_code": "",
+      "input_format": "",
+      "output_format": "",
+      "constraints_text": "",
+      "reference_solution": "",
+      "reference_answer": "",
+      "marking_rubric": "",
+      "topic": "",
+      "subtopic": "",
+      "bloom_level": "",
+      "estimated_minutes": 0,
+      "tags": [],
       "answer_basis": "generated",
       "test_cases": []
     }
@@ -1467,8 +1511,9 @@ ANSWER KEYS:
 - If no answer is printed but the MCQ has one clearly solvable correct answer, solve it and set answer_basis="inferred".
 - If genuinely ambiguous, correct_key="" and answer_basis="unknown". Do NOT guess.
 - For cloze, infer the answer only when it is clear; otherwise leave cloze_answers=[].
-- For coding questions, create exactly 6 test cases when the specification is sufficient:
-  first 4 visible, final 2 hidden.
+- For coding questions, create exactly 6 test cases when the specification is sufficient.
+- Set every imported/generated coding test is_hidden=true; the platform randomly exposes 1-2 later.
+- When the coding specification is sufficient, also provide a correct reference_solution and fill input_format/output_format/constraints_text when they can be determined from the paper.
 - If a coding question is incomplete, use test_cases=[] rather than inventing a specification.
 
 Return ONLY:
@@ -1488,6 +1533,17 @@ Return ONLY:
       "language": "",
       "func_signature": "",
       "starter_code": "",
+      "input_format": "",
+      "output_format": "",
+      "constraints_text": "",
+      "reference_solution": "",
+      "reference_answer": "",
+      "marking_rubric": "",
+      "topic": "",
+      "subtopic": "",
+      "bloom_level": "",
+      "estimated_minutes": 0,
+      "tags": [],
       "answer_basis": "explicit|inferred|unknown",
       "test_cases": []
     }
@@ -1637,6 +1693,23 @@ function tidyQuestion(
   out.language = String(out.language ?? "").trim();
   out.func_signature = String(out.func_signature ?? "").trim();
   out.starter_code = String(out.starter_code ?? "");
+  out.input_format = String(out.input_format ?? "").trim();
+  out.output_format = String(out.output_format ?? "").trim();
+  out.constraints_text = String(out.constraints_text ?? "").trim();
+  out.reference_solution = String(out.reference_solution ?? "");
+  out.reference_answer = String(out.reference_answer ?? "").trim();
+  out.marking_rubric = String(out.marking_rubric ?? "").trim();
+  out.topic = String(out.topic ?? "").trim();
+  out.subtopic = String(out.subtopic ?? "").trim();
+  out.bloom_level = [
+    "remember", "understand", "apply", "analyze", "evaluate", "create",
+  ].includes(String(out.bloom_level ?? "").toLowerCase())
+    ? String(out.bloom_level).toLowerCase()
+    : "";
+  out.estimated_minutes = Math.max(0, Math.min(240, Number(out.estimated_minutes) || 0));
+  out.tags = Array.isArray(out.tags)
+    ? out.tags.map((x: any) => String(x ?? "").trim()).filter(Boolean).slice(0, 20)
+    : [];
 
   out.answer_basis =
     ["generated", "explicit", "inferred", "unknown", "verified"].includes(
@@ -1659,6 +1732,18 @@ function tidyQuestion(
 
   if (out.qtype !== "cloze") {
     out.cloze_answers = [];
+  }
+
+  if (out.qtype !== "coding") {
+    out.input_format = "";
+    out.output_format = "";
+    out.constraints_text = "";
+    out.reference_solution = "";
+  }
+
+  if (out.qtype !== "long") {
+    out.reference_answer = "";
+    out.marking_rubric = "";
   }
 
   out._provider = provider;
