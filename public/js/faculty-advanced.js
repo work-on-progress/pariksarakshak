@@ -888,6 +888,9 @@ async function importCurrentExamToBank() {
     mcq_kind: q.mcq_kind ?? null,
     marks: q.marks,
     prompt: q.prompt,
+    prompt_html: q.prompt_html ?? null,
+    explanation: q.explanation ?? null,
+    explanation_html: q.explanation_html ?? null,
     options: q.options,
     correct_key: q.correct_key,
     cloze_answers: q.cloze_answers,
@@ -895,9 +898,20 @@ async function importCurrentExamToBank() {
     language: q.language,
     func_signature: q.func_signature,
     starter_code: q.starter_code,
+    input_format: q.input_format ?? null,
+    output_format: q.output_format ?? null,
+    constraints_text: q.constraints_text ?? null,
+    reference_solution: q.reference_solution ?? null,
+    reference_answer: q.reference_answer ?? null,
+    reference_answer_html: q.reference_answer_html ?? null,
+    marking_rubric: q.marking_rubric ?? null,
+    marking_rubric_html: q.marking_rubric_html ?? null,
     test_cases: testsByQuestion[q.id] ?? [],
-    topic: exam?.title ?? null,
-    tags: [exam?.exam_code].filter(Boolean),
+    topic: q.topic ?? exam?.title ?? null,
+    subtopic: q.subtopic ?? null,
+    bloom_level: q.bloom_level ?? null,
+    estimated_minutes: q.estimated_minutes ?? null,
+    tags: Array.isArray(q.tags) && q.tags.length ? q.tags : [exam?.exam_code].filter(Boolean),
   }));
 
   const { error: insertError } = await supabase
@@ -948,6 +962,9 @@ async function addBankQuestionToExam(bankId) {
       position: nextPosition,
       marks: bank.marks,
       prompt: bank.prompt,
+      prompt_html: bank.prompt_html,
+      explanation: bank.explanation,
+      explanation_html: bank.explanation_html,
       options: bank.options,
       correct_key: bank.correct_key,
       cloze_answers: bank.cloze_answers,
@@ -955,6 +972,19 @@ async function addBankQuestionToExam(bankId) {
       language: bank.language,
       func_signature: bank.func_signature,
       starter_code: bank.starter_code,
+      input_format: bank.input_format,
+      output_format: bank.output_format,
+      constraints_text: bank.constraints_text,
+      reference_solution: bank.reference_solution,
+      reference_answer: bank.reference_answer,
+      reference_answer_html: bank.reference_answer_html,
+      marking_rubric: bank.marking_rubric,
+      marking_rubric_html: bank.marking_rubric_html,
+      topic: bank.topic,
+      subtopic: bank.subtopic,
+      bloom_level: bank.bloom_level,
+      estimated_minutes: bank.estimated_minutes,
+      tags: bank.tags ?? [],
     })
     .select("id")
     .single();
@@ -966,7 +996,7 @@ async function addBankQuestionToExam(bankId) {
       question_id: inserted.id,
       stdin: String(t.stdin ?? ""),
       expected_out: String(t.expected_out ?? ""),
-      is_hidden: t.is_hidden !== false,
+      is_hidden: true,
       position: Number(t.position ?? index + 1),
     }));
 
@@ -976,6 +1006,23 @@ async function addBankQuestionToExam(bankId) {
         .insert(testRows);
 
       if (testError) return showMessage(testError.message, "error");
+
+      const { data: visibleCount, error: sampleError } = await supabase.rpc(
+        "randomize_visible_test_cases",
+        { p_question_id: inserted.id },
+      );
+      if (sampleError) {
+        return showMessage(
+          `Question copied, but sample tests could not be selected: ${sampleError.message}`,
+          "error",
+        );
+      }
+
+      showMessage(
+        `Question added · ${visibleCount} random sample test${visibleCount === 1 ? "" : "s"} visible.`,
+        "ok",
+      );
+      return;
     }
   }
 
