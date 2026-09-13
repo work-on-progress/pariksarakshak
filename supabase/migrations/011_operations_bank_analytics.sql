@@ -290,7 +290,7 @@ create or replace function public.exam_question_analytics(
 )
 returns table (
   question_id uuid,
-  position int,
+  "position" int,
   qtype text,
   prompt text,
   marks numeric,
