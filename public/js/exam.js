@@ -44,7 +44,10 @@ let submissionInProgress = false;
 // Shows students whether every change has actually reached the database.
 const pendingSaveQuestions = new Set();
 const failedSaveQuestions = new Set();
+const saveFailureSeen = new Set();
 let globalSaveIndicator = null;
+let lastSuccessfulSaveAt = 0;
+let saveAgeTimer = null;
 
 // EXAM_EXPERIENCE_V2
 let questionFocusObserver = null;
@@ -179,7 +182,7 @@ function showRules() {
       ];
 
   const coding = questionsLikelyHaveCode()
-    ? ["Coding answers earn marks only when every test passes, including the hidden ones."]
+    ? ["Coding answers are tested automatically. Partial marks may be awarded for tests passed, including hidden tests."]
     : [];
 
   document.getElementById("rulesList").innerHTML =
@@ -215,6 +218,12 @@ async function startAttempt() {
     return;
   }
   attempt = created;
+
+  await safeAttemptEvent("ATTEMPT_STARTED", {
+    delivery_mode: runningMode,
+  });
+  await touchAttemptHealth(false, null);
+
   openPaper(false);
 }
 
@@ -272,7 +281,17 @@ async function openPaper(resuming) {
   loadReviewMarks();
   renderPaper(saved);
   updateGlobalSaveIndicator();
+  startSaveAgeTicker();
   recomputeEndsAt();
+
+  if (resuming) {
+    showRecoveryBanner(saved);
+    safeAttemptEvent("ATTEMPT_RESUMED", {
+      restored_answers: Object.keys(saved).length,
+      remaining_seconds: Math.max(0, Math.floor((endsAt - Date.now()) / 1000)),
+    });
+  }
+
   startTimer();
   startHeartbeat();
   if (PROCTOR_ENABLED) beginProctoring();
@@ -288,12 +307,24 @@ async function openPaper(resuming) {
 
 async function loadSavedAnswers() {
   const { data } = await supabase.from("answers")
-    .select("question_id, answer_text, code_submitted").eq("attempt_id", attempt.id);
+    .select("question_id, answer_text, code_submitted, updated_at")
+    .eq("attempt_id", attempt.id);
+
   const map = {};
+  let latest = 0;
+
   (data ?? []).forEach((a) => {
     map[a.question_id] = a;
     if (a.answer_text || a.code_submitted) answered[a.question_id] = true;
+
+    const ts = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+    if (ts > latest) latest = ts;
   });
+
+  if (latest) {
+    lastSuccessfulSaveAt = latest;
+  }
+
   return map;
 }
 
@@ -479,7 +510,7 @@ function buildCoding(q, body, state, prior) {
   const resetBtn = Object.assign(document.createElement("button"),
     { className: "btn ghost small", textContent: "Reset code" });
   const hint = Object.assign(document.createElement("span"),
-    { className: "meta", textContent: "every test must pass" });
+    { className: "meta", textContent: "partial marks available for passed tests" });
   hint.style.color = "var(--ink-3)";
   actions.append(runBtn, submitBtn, resetBtn, hint);
 
@@ -1100,7 +1131,107 @@ function updateGlobalSaveIndicator() {
     return;
   }
 
-  setGlobalSaveState("All changes saved ✓", "ok");
+  if (lastSuccessfulSaveAt) {
+    setGlobalSaveState(
+      `Online · saved ${shortAge(lastSuccessfulSaveAt)}`,
+      "ok",
+    );
+  } else {
+    setGlobalSaveState("Online · answers loaded ✓", "ok");
+  }
+}
+
+function startSaveAgeTicker() {
+  clearInterval(saveAgeTimer);
+  saveAgeTimer = setInterval(() => {
+    if (finished) {
+      clearInterval(saveAgeTimer);
+      return;
+    }
+
+    if (
+      !pendingSaveQuestions.size &&
+      !failedSaveQuestions.size &&
+      navigator.onLine
+    ) {
+      updateGlobalSaveIndicator();
+    }
+  }, 5000);
+}
+
+function shortAge(value) {
+  const ts = typeof value === "number"
+    ? value
+    : new Date(value).getTime();
+
+  const sec = Math.max(
+    0,
+    Math.floor((Date.now() - ts) / 1000),
+  );
+
+  if (sec < 10) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+
+  return `${Math.floor(min / 60)}h ago`;
+}
+
+async function touchAttemptHealth(saved = false, error = null) {
+  if (!attempt?.id) return;
+
+  try {
+    await supabase.rpc("touch_attempt_health", {
+      p_attempt_id: attempt.id,
+      p_saved: Boolean(saved),
+      p_save_error: error ? String(error).slice(0, 600) : null,
+    });
+  } catch (e) {
+    console.warn("[attempt health]", e);
+  }
+}
+
+async function safeAttemptEvent(type, detail = {}) {
+  if (!attempt?.id) return;
+
+  try {
+    await supabase.rpc("log_attempt_event", {
+      p_attempt_id: attempt.id,
+      p_event_type: type,
+      p_detail: detail ?? {},
+    });
+  } catch (e) {
+    console.warn("[attempt audit]", type, e);
+  }
+}
+
+function showRecoveryBanner(saved) {
+  const sheet = document.querySelector(".paper-sheet");
+  if (!sheet || document.getElementById("recoveryBanner")) return;
+
+  const restored = Object.values(saved ?? {}).filter(
+    (a) => a?.answer_text || a?.code_submitted,
+  ).length;
+
+  const left = Math.max(0, endsAt - Date.now());
+  const m = Math.floor(left / 60000);
+  const s = Math.floor((left % 60000) / 1000);
+
+  const el = document.createElement("div");
+  el.id = "recoveryBanner";
+  el.className = "notice ok recovery-banner";
+  el.innerHTML = `
+    <b>Attempt recovered.</b>
+    ${restored}/${questions.length} saved answer${restored === 1 ? "" : "s"} restored ·
+    ${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} remaining.
+    <button type="button" class="recovery-close" aria-label="Dismiss">×</button>
+  `;
+
+  const progress = document.getElementById("progress");
+  progress?.insertAdjacentElement("afterend", el);
+
+  el.querySelector(".recovery-close").onclick = () => el.remove();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1144,6 +1275,20 @@ function queueSave(
       failedSaveQuestions.add(question_id);
       updateGlobalSaveIndicator();
 
+      touchAttemptHealth(
+        false,
+        `${error.code ?? "error"} ${error.message ?? ""}`,
+      );
+
+      if (!saveFailureSeen.has(question_id)) {
+        saveFailureSeen.add(question_id);
+        safeAttemptEvent("ANSWER_SAVE_FAILED", {
+          question_id,
+          code: error.code ?? null,
+          message: error.message ?? null,
+        });
+      }
+
       showSaveBanner(error, attemptNo);
       setTimeout(
         () => queueSave(question_id, stateEl, fields, attemptNo + 1, delayMs),
@@ -1157,6 +1302,17 @@ function queueSave(
 
     pendingSaveQuestions.delete(question_id);
     failedSaveQuestions.delete(question_id);
+
+    lastSuccessfulSaveAt = Date.now();
+    touchAttemptHealth(true, null);
+
+    if (saveFailureSeen.has(question_id)) {
+      saveFailureSeen.delete(question_id);
+      safeAttemptEvent("ANSWER_SAVE_RECOVERED", {
+        question_id,
+      });
+    }
+
     updateGlobalSaveIndicator();
 
     markDone(question_id);
@@ -1271,6 +1427,12 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
     stateEl.dataset.ok = res.all_passed ? "1" : "0";
     stateEl.textContent = `submitted · ${res.passed}/${res.total}`;
     markDone(question_id);
+
+    safeAttemptEvent("CODING_MANUAL_SUBMIT", {
+      question_id,
+      passed: Number(res.passed ?? 0),
+      total: Number(res.total ?? 0),
+    });
   }
 }
 
@@ -1615,13 +1777,22 @@ function startTimer() {
 }
 
 function startHeartbeat() {
-  setInterval(async () => {
+  const beat = async () => {
     if (finished) return;
+
+    touchAttemptHealth(false, null);
 
     const { data } = await supabase.from("attempts")
       .select("extra_minutes, status").eq("id", attempt.id).single();
+
     if (data) {
-      if (data.status === "submitted") { finished = true; showReceipt(true, null); return; }
+      if (data.status === "submitted") {
+        finished = true;
+        safeAttemptEvent("SUBMISSION_CONFIRMED_EXTERNALLY", {});
+        showReceipt(true, null);
+        return;
+      }
+
       if (data.extra_minutes !== attempt.extra_minutes) {
         attempt.extra_minutes = data.extra_minutes;
         recomputeEndsAt();
@@ -1630,13 +1801,26 @@ function startHeartbeat() {
 
     // One paper, one place. Opening it elsewhere revokes this session.
     if (sessionToken && BROWSER_MODE.singleSession) {
-      const res = await callPublicFunction("session-check", { session_token: sessionToken });
+      const res = await callPublicFunction("session-check", {
+        session_token: sessionToken,
+      });
+
       if (res.active === false && res.reason === "revoked") {
-        lockOut("Your paper was opened on another machine or in another window, so this copy has been closed.");
+        safeAttemptEvent("SESSION_REVOKED", {
+          reason: res.reason,
+        });
+
+        lockOut(
+          "Your paper was opened on another machine or in another window, so this copy has been closed.",
+        );
       }
     }
-  }, HEARTBEAT_MS);
+  };
+
+  beat();
+  setInterval(beat, HEARTBEAT_MS);
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════
    10 · SUBMIT
@@ -1658,6 +1842,15 @@ async function finish(auto) {
 
   submissionInProgress = true;
   finished = true;
+
+  await safeAttemptEvent(
+    auto ? "AUTO_SUBMIT_STARTED" : "FINAL_SUBMIT_STARTED",
+    {
+      auto: Boolean(auto),
+      answered: Object.keys(answered).filter((id) => answered[id]).length,
+      total_questions: questions.length,
+    },
+  );
 
   clearTimeout(lockTimer);
   showCover(false);
@@ -1693,6 +1886,13 @@ async function finish(auto) {
         );
       },
     );
+
+    await safeAttemptEvent("CODING_FINALIZATION_COMPLETED", {
+      total: codingSummary.total,
+      evaluated: codingSummary.evaluated,
+      blank: codingSummary.blank,
+      failed: codingSummary.failed,
+    });
   }
 
   showSubmissionStatus("Finalizing objective and coding marks…");
@@ -1704,6 +1904,16 @@ async function finish(auto) {
 
   if (error) {
     console.error("[grade_attempt]", error);
+
+    await safeAttemptEvent("FINAL_SUBMIT_FAILED", {
+      message: error.message ?? String(error),
+      code: error.code ?? null,
+    });
+  } else {
+    await safeAttemptEvent("FINAL_SUBMIT_CONFIRMED", {
+      score,
+      auto: Boolean(auto),
+    });
   }
 
   clearReviewMarks();
