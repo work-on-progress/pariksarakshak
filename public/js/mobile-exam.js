@@ -189,14 +189,15 @@ function injectMobileStyles() {
       .hall-bar {
         top: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto 50px;
-        grid-template-rows: auto auto;
-        gap: .28rem .45rem;
+        grid-template-columns: minmax(0, 1fr) auto 48px;
+        grid-template-rows: auto auto auto;
+        gap: .3rem .42rem;
         align-items: center;
+        min-height: 0;
         padding:
-          max(.38rem, env(safe-area-inset-top))
+          max(.42rem, env(safe-area-inset-top))
           max(.5rem, env(safe-area-inset-right))
-          .38rem
+          .42rem
           max(.5rem, env(safe-area-inset-left));
       }
 
@@ -212,6 +213,7 @@ function injectMobileStyles() {
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: .9rem;
+        line-height: 1.15;
       }
 
       #paperCode,
@@ -228,38 +230,77 @@ function injectMobileStyles() {
         padding: .26rem .45rem;
       }
 
-      #cam {
+      .camera-shell {
         grid-column: 3;
         grid-row: 1;
-        width: 46px;
-        height: 36px;
+        width: 44px;
+        height: 34px;
         justify-self: end;
         align-self: center;
+      }
+
+      #cam {
+        width: 44px;
+        height: 34px;
+        border-radius: 8px;
+      }
+
+      .camera-live-dot {
+        right: 3px;
+        top: 3px;
+        width: 6px;
+        height: 6px;
       }
 
       #camState {
         display: none;
       }
 
-      #attention {
+      #examProgressSummary {
         grid-column: 1;
         grid-row: 2;
+        justify-self: start;
+        min-height: 26px;
+        max-width: 108px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: .55rem;
+        padding: .22rem .4rem;
+      }
+
+      #globalSaveStatus {
+        grid-column: 2;
+        grid-row: 2;
+        justify-self: end;
+        min-height: 26px !important;
+        max-width: 96px !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: .5rem !important;
+        padding: .2rem .35rem !important;
+      }
+
+      #attention {
+        grid-column: 1 / 4;
+        grid-row: 3;
         min-width: 0;
-        font-size: .58rem;
+        max-width: 100%;
+        font-size: .55rem;
         line-height: 1.2;
         white-space: normal;
+        padding: .24rem .4rem;
       }
 
       #finishBtn {
-        grid-column: 2 / 4;
+        grid-column: 3;
         grid-row: 2;
         justify-self: end;
         width: auto;
-        min-height: 34px;
-        max-width: 150px;
+        min-height: 30px;
+        max-width: 100px;
         justify-content: center;
-        padding: .34rem .58rem;
-        font-size: .78rem;
+        padding: .28rem .42rem;
+        font-size: .67rem;
         white-space: nowrap;
       }
 
@@ -277,18 +318,33 @@ function injectMobileStyles() {
       }
 
       .progress-strip {
-        top: 4.9rem;
-        gap: 3px;
-        padding: .28rem 0;
+        position: static;
+        top: auto;
+        display: flex;
+        flex-wrap: nowrap;
+        gap: .32rem;
+        margin: .15rem 0 .25rem;
+        padding: .42rem;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
+      }
+
+      .progress-strip::-webkit-scrollbar {
+        display: none;
       }
 
       .pip {
-        width: 20px;
+        width: 29px;
+        height: 29px;
+        flex: 0 0 29px;
+        border-radius: 8px;
+        font-size: .56rem;
       }
 
       .qcard {
-        padding: .85rem .78rem;
-        border-radius: 10px;
+        padding: .9rem .82rem 1rem;
+        border-radius: 14px;
         min-width: 0;
         max-width: 100%;
         overflow: hidden;
@@ -319,7 +375,8 @@ function injectMobileStyles() {
       }
 
       .qcard .save-state {
-        width: 100%;
+        width: auto;
+        max-width: 100%;
         margin-left: 0;
       }
 
@@ -444,9 +501,14 @@ function injectMobileStyles() {
         grid-template-rows: auto auto;
       }
 
+      .pr-keyboard-open .camera-shell {
+        width: 40px;
+        height: 30px;
+      }
+
       .pr-keyboard-open #cam {
-        width: 42px;
-        height: 32px;
+        width: 40px;
+        height: 30px;
       }
 
       .pr-keyboard-open #camState {
@@ -455,13 +517,13 @@ function injectMobileStyles() {
 
       .pr-keyboard-open #finishBtn {
         grid-row: 2;
-        grid-column: 2 / 4;
+        grid-column: 3;
         width: auto;
       }
 
       .pr-keyboard-open #attention {
-        grid-column: 1;
-        grid-row: 2;
+        grid-column: 1 / 4;
+        grid-row: 3;
       }
     }
   `;
