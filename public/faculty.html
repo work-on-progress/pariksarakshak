@@ -258,7 +258,32 @@
               <textarea id="mSnippet" rows="5" class="mono-input" placeholder="for i in range(3):&#10;    print(i * 2)"></textarea></label>
 
             <label class="field"><span>Question</span>
-              <textarea id="mPrompt" rows="3" placeholder="For fill-in-the-blanks use ____ for each blank."></textarea></label>
+              <textarea id="mPrompt" rows="5" placeholder="For fill-in-the-blanks use ____ for each blank."></textarea>
+              <small class="field-help">Use the formatting toolbar for bold, italic, underline, lists, code blocks, quotes and more.</small>
+            </label>
+
+            <div class="row-3 question-meta-fields">
+              <label class="field"><span>Topic (optional)</span>
+                <input id="mTopic" placeholder="Loops"></label>
+              <label class="field"><span>Sub-topic (optional)</span>
+                <input id="mSubtopic" placeholder="Nested loops"></label>
+              <label class="field"><span>Bloom level (optional)</span>
+                <select id="mBloom">
+                  <option value="">Not set</option>
+                  <option value="remember">Remember</option>
+                  <option value="understand">Understand</option>
+                  <option value="apply">Apply</option>
+                  <option value="analyze">Analyze</option>
+                  <option value="evaluate">Evaluate</option>
+                  <option value="create">Create</option>
+                </select></label>
+            </div>
+            <div class="row question-meta-fields">
+              <label class="field"><span>Tags (comma separated)</span>
+                <input id="mTags" placeholder="python, loops, range"></label>
+              <label class="field"><span>Estimated solving time (minutes)</span>
+                <input id="mEstimated" type="number" min="1" max="240" placeholder="5"></label>
+            </div>
 
             <div id="mMcqBox">
               <div class="row">
@@ -278,6 +303,13 @@
                 <input id="mCloze" class="mono-input" placeholder="WHERE | HAVING"></label>
             </div>
 
+            <div id="mLongBox" class="hidden">
+              <label class="field"><span>Reference answer (optional · faculty only)</span>
+                <textarea id="mReferenceAnswer" rows="6" placeholder="A model/reference answer for marking."></textarea></label>
+              <label class="field"><span>Marking rubric (optional · faculty only)</span>
+                <textarea id="mRubric" rows="5" placeholder="Example: 2 marks definition, 2 marks explanation, 1 mark example."></textarea></label>
+            </div>
+
             <div id="mCodingBox" class="hidden">
               <label class="field"><span>Language</span>
                 <select id="mLang">
@@ -285,18 +317,39 @@
                   <option value="cpp">C++</option><option value="java">Java</option>
                   <option value="javascript">JavaScript</option>
                 </select></label>
+
+              <div class="row">
+                <label class="field"><span>Input format</span>
+                  <textarea id="mInputFormat" rows="4" placeholder="Describe exactly what the program reads."></textarea></label>
+                <label class="field"><span>Output format</span>
+                  <textarea id="mOutputFormat" rows="4" placeholder="Describe exactly what the program prints."></textarea></label>
+              </div>
+
+              <label class="field"><span>Constraints (optional)</span>
+                <textarea id="mConstraints" rows="3" placeholder="Example: 1 ≤ n ≤ 100000"></textarea></label>
+
               <label class="field"><span>Starter code</span>
-                <textarea id="mStarter" rows="4" class="mono-input"></textarea></label>
-              <p class="meta" style="color:var(--ink-3)">Test cases — tick "hidden" for the ones students must not see</p>
+                <textarea id="mStarter" rows="5" class="mono-input" placeholder="Code given to the student before they start."></textarea></label>
+
+              <label class="field"><span>Reference solution / code answer (optional · faculty only)</span>
+                <textarea id="mReferenceSolution" rows="9" class="mono-input" placeholder="A correct complete solution. This is never sent to students during the exam."></textarea></label>
+
+              <div class="coding-tests-head">
+                <div>
+                  <b>Test cases</b>
+                  <span>On every save, the server randomly chooses 1–2 test cases as student-visible samples. Every other test stays hidden.</span>
+                </div>
+                <button class="btn ghost small" id="addTest" type="button">Add a test case</button>
+              </div>
               <div id="mTests"></div>
-              <button class="btn ghost small" id="addTest">Add a test case</button>
             </div>
 
             <label class="field"><span>Why the answer is right (optional)</span>
-              <input id="mExplain" placeholder="Shown to students when you release results."></label>
+              <textarea id="mExplain" rows="5" placeholder="Write multiple lines, bullet points, bold text, code or a short explanation. Kept faculty-only during the active exam."></textarea></label>
 
             <div class="actions" style="margin-top:1rem">
               <button class="btn" id="mSave">Add to paper</button>
+              <button class="btn ghost" id="mPreview">Preview as student</button>
               <button class="btn ghost hidden" id="mCancel">Cancel edit</button>
             </div>
             <p id="mMsg" class="notice hidden" style="margin-top:.8rem"></p>
