@@ -40,6 +40,12 @@ const CODING_AUTOSAVE_DELAY_MS = 150;
 const FINAL_CODE_TIMEOUT_MS = 35000;
 let submissionInProgress = false;
 
+// GLOBAL_SAVE_STATUS_V1
+// Shows students whether every change has actually reached the database.
+const pendingSaveQuestions = new Set();
+const failedSaveQuestions = new Set();
+let globalSaveIndicator = null;
+
 boot();
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -253,7 +259,9 @@ async function openPaper(resuming) {
 
   document.getElementById("finishBtn").onclick = () => finish(false);
 
+  installGlobalSaveIndicator();
   renderPaper(saved);
+  updateGlobalSaveIndicator();
   recomputeEndsAt();
   startTimer();
   startHeartbeat();
@@ -495,6 +503,137 @@ const cmMode = (lang) => ({
 }[lang] ?? "python");
 
 /* ══════════════════════════════════════════════════════════════════════
+   GLOBAL SAVE STATUS
+   ══════════════════════════════════════════════════════════════════════ */
+
+function installGlobalSaveIndicator() {
+  if (document.getElementById("globalSaveStatus")) {
+    globalSaveIndicator =
+      document.getElementById("globalSaveStatus");
+    return;
+  }
+
+  const bar = document.querySelector(".hall-bar");
+  if (!bar) return;
+
+  const el = document.createElement("span");
+  el.id = "globalSaveStatus";
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
+  el.style.cssText = `
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:28px;
+    padding:.28rem .55rem;
+    border-radius:6px;
+    border:1px solid var(--rule);
+    font-family:var(--mono);
+    font-size:.62rem;
+    letter-spacing:.04em;
+    white-space:nowrap;
+    color:var(--ink-3);
+    background:var(--card-2);
+  `;
+
+  const spacer = bar.querySelector(".spacer");
+  bar.insertBefore(el, spacer || null);
+
+  globalSaveIndicator = el;
+
+  if (!document.getElementById("globalSaveStatusStyle")) {
+    const style = document.createElement("style");
+    style.id = "globalSaveStatusStyle";
+    style.textContent = `
+      @media (max-width: 700px), (pointer: coarse) {
+        #globalSaveStatus {
+          max-width: 120px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-size: .52rem !important;
+          padding: .22rem .4rem !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  window.addEventListener("online", updateGlobalSaveIndicator);
+  window.addEventListener("offline", updateGlobalSaveIndicator);
+}
+
+function setGlobalSaveState(text, kind = "idle") {
+  if (!globalSaveIndicator) return;
+
+  globalSaveIndicator.textContent = text;
+  globalSaveIndicator.dataset.state = kind;
+
+  const palette = {
+    ok: {
+      color: "var(--pass)",
+      border: "var(--pass)",
+      background: "var(--pass-wash)",
+    },
+    saving: {
+      color: "var(--blue)",
+      border: "var(--blue)",
+      background: "var(--blue-wash)",
+    },
+    error: {
+      color: "var(--seal)",
+      border: "var(--seal)",
+      background: "var(--seal-wash)",
+    },
+    offline: {
+      color: "var(--warn)",
+      border: "var(--warn)",
+      background: "var(--card-2)",
+    },
+    idle: {
+      color: "var(--ink-3)",
+      border: "var(--rule)",
+      background: "var(--card-2)",
+    },
+  };
+
+  const p = palette[kind] ?? palette.idle;
+
+  globalSaveIndicator.style.color = p.color;
+  globalSaveIndicator.style.borderColor = p.border;
+  globalSaveIndicator.style.background = p.background;
+}
+
+function updateGlobalSaveIndicator() {
+  if (!globalSaveIndicator) return;
+
+  if (!navigator.onLine) {
+    setGlobalSaveState(
+      "Offline · answers waiting",
+      "offline",
+    );
+    return;
+  }
+
+  if (failedSaveQuestions.size) {
+    setGlobalSaveState(
+      `${failedSaveQuestions.size} answer${failedSaveQuestions.size === 1 ? "" : "s"} retrying`,
+      "error",
+    );
+    return;
+  }
+
+  if (pendingSaveQuestions.size) {
+    setGlobalSaveState(
+      `Saving ${pendingSaveQuestions.size}…`,
+      "saving",
+    );
+    return;
+  }
+
+  setGlobalSaveState("All changes saved ✓", "ok");
+}
+
+/* ══════════════════════════════════════════════════════════════════════
    5 · SAVING — and this time the real reason is shown
    ══════════════════════════════════════════════════════════════════════ */
 function markDone(question_id) {
@@ -513,6 +652,10 @@ function queueSave(
   stateEl.dataset.ok = "0";
   stateEl.textContent = "saving…";
 
+  pendingSaveQuestions.add(question_id);
+  failedSaveQuestions.delete(question_id);
+  updateGlobalSaveIndicator();
+
   saveTimers[question_id] = setTimeout(async () => {
     const { error } = await supabase.from("answers").upsert({
       attempt_id: attempt.id, question_id, ...fields,
@@ -525,6 +668,11 @@ function queueSave(
       console.error("[save failed]", error);
       stateEl.dataset.ok = "0";
       stateEl.textContent = `not saved (${error.code ?? "error"})`;
+
+      pendingSaveQuestions.delete(question_id);
+      failedSaveQuestions.add(question_id);
+      updateGlobalSaveIndicator();
+
       showSaveBanner(error, attemptNo);
       setTimeout(
         () => queueSave(question_id, stateEl, fields, attemptNo + 1, delayMs),
@@ -535,6 +683,11 @@ function queueSave(
 
     stateEl.dataset.ok = "1";
     stateEl.textContent = "saved";
+
+    pendingSaveQuestions.delete(question_id);
+    failedSaveQuestions.delete(question_id);
+    updateGlobalSaveIndicator();
+
     markDone(question_id);
     hideSaveBanner();
   }, delayMs);
@@ -657,6 +810,9 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
 async function flushCodingDrafts() {
   const coding = questions.filter((q) => q.qtype === "coding");
 
+  coding.forEach((q) => pendingSaveQuestions.add(q.id));
+  updateGlobalSaveIndicator();
+
   return Promise.all(
     coding.map(async (q) => {
       const cm = editors[q.id];
@@ -680,8 +836,20 @@ async function flushCodingDrafts() {
 
       if (error) {
         console.warn("[final code flush]", q.id, error);
-        return { question_id: q.id, saved: false, error: error.message };
+        pendingSaveQuestions.delete(q.id);
+        failedSaveQuestions.add(q.id);
+        updateGlobalSaveIndicator();
+
+        return {
+          question_id: q.id,
+          saved: false,
+          error: error.message,
+        };
       }
+
+      pendingSaveQuestions.delete(q.id);
+      failedSaveQuestions.delete(q.id);
+      updateGlobalSaveIndicator();
 
       return {
         question_id: q.id,
@@ -827,6 +995,10 @@ async function submitAllCodingForMarks(onProgress = () => {}) {
 
 function showSubmissionStatus(text) {
   const btn = document.getElementById("finishBtn");
+
+  if (globalSaveIndicator) {
+    setGlobalSaveState(text, "saving");
+  }
 
   if (btn) {
     btn.disabled = true;
