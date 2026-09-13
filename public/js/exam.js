@@ -46,6 +46,9 @@ const pendingSaveQuestions = new Set();
 const failedSaveQuestions = new Set();
 let globalSaveIndicator = null;
 
+// EXAM_EXPERIENCE_V2
+let questionFocusObserver = null;
+
 boot();
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -322,6 +325,8 @@ function renderPaper(saved) {
     pip.className = "pip" + (answered[q.id] ? " done" : "");
     pip.id = `pip-${q.id}`;
     pip.title = `Question ${i + 1}`;
+    pip.textContent = String(i + 1);
+    pip.setAttribute("aria-label", `Go to question ${i + 1}`);
     pip.onclick = () => document.getElementById(`card-${q.id}`)
       .scrollIntoView({ behavior: "smooth", block: "start" });
     strip.appendChild(pip);
@@ -360,6 +365,9 @@ function renderPaper(saved) {
     if (q.qtype === "long")   buildLong(q, body, state, prior);
     if (q.qtype === "coding") buildCoding(q, body, state, prior);
   });
+
+  updateExamProgressSummary();
+  installQuestionFocusTracking();
 }
 
 function buildMcq(q, body, state, prior) {
@@ -503,6 +511,72 @@ const cmMode = (lang) => ({
 }[lang] ?? "python");
 
 /* ══════════════════════════════════════════════════════════════════════
+   EXAM EXPERIENCE V2 — PROGRESS + CURRENT QUESTION
+   ══════════════════════════════════════════════════════════════════════ */
+
+function updateExamProgressSummary() {
+  const el = document.getElementById("examProgressSummary");
+  if (!el) return;
+
+  const total = questions.length;
+  const done = questions.filter((q) => Boolean(answered[q.id])).length;
+  const left = Math.max(total - done, 0);
+
+  el.textContent =
+    left === 0 && total
+      ? `${done} / ${total} answered · complete`
+      : `${done} / ${total} answered`;
+}
+
+function setCurrentQuestion(questionId) {
+  document
+    .querySelectorAll("#progress .pip")
+    .forEach((pip) => pip.classList.remove("current"));
+
+  document
+    .querySelectorAll(".qcard")
+    .forEach((card) => card.classList.remove("current-question"));
+
+  document.getElementById(`pip-${questionId}`)?.classList.add("current");
+  document.getElementById(`card-${questionId}`)?.classList.add("current-question");
+}
+
+function installQuestionFocusTracking() {
+  questionFocusObserver?.disconnect();
+
+  const cards = [...document.querySelectorAll(".qcard")];
+  if (!cards.length) return;
+
+  setCurrentQuestion(questions[0]?.id);
+
+  questionFocusObserver = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => {
+          const da = Math.abs(a.boundingClientRect.top - 150);
+          const db = Math.abs(b.boundingClientRect.top - 150);
+          return da - db;
+        });
+
+      if (!visible.length) return;
+
+      const id =
+        visible[0].target.id.replace(/^card-/, "");
+
+      setCurrentQuestion(id);
+    },
+    {
+      root: null,
+      rootMargin: "-18% 0px -55% 0px",
+      threshold: [0, 0.15, 0.4],
+    },
+  );
+
+  cards.forEach((card) => questionFocusObserver.observe(card));
+}
+
+/* ══════════════════════════════════════════════════════════════════════
    GLOBAL SAVE STATUS
    ══════════════════════════════════════════════════════════════════════ */
 
@@ -639,6 +713,7 @@ function updateGlobalSaveIndicator() {
 function markDone(question_id) {
   answered[question_id] = true;
   document.getElementById(`pip-${question_id}`)?.classList.add("done");
+  updateExamProgressSummary();
 }
 
 function queueSave(
