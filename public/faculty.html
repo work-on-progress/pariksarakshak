@@ -258,9 +258,27 @@
               <textarea id="mSnippet" rows="5" class="mono-input" placeholder="for i in range(3):&#10;    print(i * 2)"></textarea></label>
 
             <label class="field"><span>Question</span>
-              <textarea id="mPrompt" rows="5" placeholder="For fill-in-the-blanks use ____ for each blank."></textarea>
+              <textarea id="mPrompt" rows="5" placeholder="Type even a rough one-line question. AI can complete the rest for you."></textarea>
               <small class="field-help">Use the formatting toolbar for bold, italic, underline, lists, code blocks, quotes and more.</small>
             </label>
+
+            <div class="manual-ai-assistant">
+              <div class="manual-ai-copy">
+                <span class="manual-ai-icon">✦</span>
+                <div>
+                  <b>AI question assistant</b>
+                  <span>
+                    Type only what you have — even one rough sentence. AI can complete options,
+                    answers, explanation, metadata, coding formats, starter/reference code and test cases.
+                  </span>
+                </div>
+              </div>
+              <div class="manual-ai-actions">
+                <button class="btn" id="mEnhanceAi" type="button">✦ Enhance with AI</button>
+                <button class="btn ghost" id="mFillMissingAi" type="button">Fill missing fields only</button>
+              </div>
+              <p id="mAiMsg" class="notice hidden"></p>
+            </div>
 
             <div class="row-3 question-meta-fields">
               <label class="field"><span>Topic (optional)</span>
