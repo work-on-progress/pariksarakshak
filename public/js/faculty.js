@@ -448,12 +448,24 @@ async function loadExams() {
         <span style="margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
           ${MODE_TAG[e.delivery_mode ?? "seb"]}
           <span class="tag ${isLive(e) ? "pass" : ""}">${isLive(e) ? "live now" : e.is_published ? "closed" : "draft"}</span>
+          <button class="btn pass tiny" data-test-exam="${e.id}">Test paper</button>
           <button class="btn ghost tiny" data-edit-exam="${e.id}">Edit</button>
           <button class="btn ghost tiny" data-toggle="${e.id}">${e.is_published ? "Unpublish" : "Publish"}</button>
           <button class="btn ghost tiny" data-del="${e.id}">Delete</button>
         </span>
       </div>`).join("")
     : `<p class="empty">No papers yet. Create one on the left.</p>`;
+
+  document.querySelectorAll("[data-test-exam]").forEach((b) => {
+    b.onclick = () => {
+      const examId = b.dataset.testExam;
+      window.open(
+        `faculty-test.html?exam=${encodeURIComponent(examId)}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
+    };
+  });
 
   document.querySelectorAll("[data-edit-exam]").forEach((b) => {
     b.onclick = () => beginExamEdit(b.dataset.editExam);
