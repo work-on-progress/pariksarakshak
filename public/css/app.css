@@ -65,9 +65,36 @@
 .qprev .tests  { font-size: .8rem; color: var(--blue); margin: .3rem 0 0; }
 .qprev .drop   { margin-left: auto; background: none; border: none; color: var(--seal); cursor: pointer; font-size: .76rem; }
 
-.testrow { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: .5rem; margin-bottom: .5rem; align-items: center; }
-.testrow input { font-family: var(--mono); font-size: .82rem; }
-.testrow label { display: flex; align-items: center; gap: .3rem; font-size: .74rem; color: var(--ink-3); white-space: nowrap; }
+.testrow {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: .5rem;
+  margin-bottom: .65rem;
+  align-items: start;
+}
+.testrow input {
+  font-family: var(--mono);
+  font-size: .82rem;
+}
+.testrow textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 78px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: .82rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.testrow label {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .74rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+  padding-top: .6rem;
+}
 
 /* ---------- LIVE FEED & ROSTER ---------- */
 .feed { max-height: 26rem; overflow: auto; display: grid; gap: .5rem; }
