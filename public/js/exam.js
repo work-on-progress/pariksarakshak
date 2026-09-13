@@ -35,6 +35,11 @@ let endsAt = 0;
 let finished = false;
 let lockTimer = null;
 
+// AUTO_CODING_FINALIZATION_V1
+const CODING_AUTOSAVE_DELAY_MS = 150;
+const FINAL_CODE_TIMEOUT_MS = 35000;
+let submissionInProgress = false;
+
 boot();
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -465,7 +470,15 @@ function buildCoding(q, body, state, prior) {
   cm.setSize("100%", "320px");
   editors[q.id] = cm;
 
-  cm.on("change", () => queueSave(q.id, state, { code_submitted: cm.getValue() }));
+  cm.on("change", () =>
+    queueSave(
+      q.id,
+      state,
+      { code_submitted: cm.getValue() },
+      0,
+      CODING_AUTOSAVE_DELAY_MS,
+    )
+  );
 
   runBtn.onclick = () => runCode(q.id, "run", verdict, [runBtn, submitBtn], state);
   submitBtn.onclick = () => runCode(q.id, "submit", verdict, [runBtn, submitBtn], state);
@@ -489,7 +502,13 @@ function markDone(question_id) {
   document.getElementById(`pip-${question_id}`)?.classList.add("done");
 }
 
-function queueSave(question_id, stateEl, fields, attemptNo = 0) {
+function queueSave(
+  question_id,
+  stateEl,
+  fields,
+  attemptNo = 0,
+  delayMs = AUTOSAVE_DELAY_MS,
+) {
   clearTimeout(saveTimers[question_id]);
   stateEl.dataset.ok = "0";
   stateEl.textContent = "saving…";
@@ -507,7 +526,10 @@ function queueSave(question_id, stateEl, fields, attemptNo = 0) {
       stateEl.dataset.ok = "0";
       stateEl.textContent = `not saved (${error.code ?? "error"})`;
       showSaveBanner(error, attemptNo);
-      setTimeout(() => queueSave(question_id, stateEl, fields, attemptNo + 1), 2500);
+      setTimeout(
+        () => queueSave(question_id, stateEl, fields, attemptNo + 1, delayMs),
+        2500,
+      );
       return;
     }
 
@@ -515,7 +537,7 @@ function queueSave(question_id, stateEl, fields, attemptNo = 0) {
     stateEl.textContent = "saved";
     markDone(question_id);
     hideSaveBanner();
-  }, AUTOSAVE_DELAY_MS);
+  }, delayMs);
 }
 
 function showSaveBanner(error, attemptNo) {
@@ -625,6 +647,198 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
     stateEl.dataset.ok = res.all_passed ? "1" : "0";
     stateEl.textContent = `submitted · ${res.passed}/${res.total}`;
     markDone(question_id);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   AUTO CODING FINALIZATION
+   ══════════════════════════════════════════════════════════════════════ */
+
+async function flushCodingDrafts() {
+  const coding = questions.filter((q) => q.qtype === "coding");
+
+  return Promise.all(
+    coding.map(async (q) => {
+      const cm = editors[q.id];
+      if (!cm) return { question_id: q.id, skipped: true };
+
+      clearTimeout(saveTimers[q.id]);
+      const code = cm.getValue();
+
+      // Save even an intentionally blank editor. Otherwise a student who
+      // deletes previously-written code just before Final Submit could have
+      // the older non-blank database value evaluated by the server.
+      const { error } = await supabase.from("answers").upsert(
+        {
+          attempt_id: attempt.id,
+          question_id: q.id,
+          code_submitted: code,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "attempt_id,question_id" },
+      );
+
+      if (error) {
+        console.warn("[final code flush]", q.id, error);
+        return { question_id: q.id, saved: false, error: error.message };
+      }
+
+      return {
+        question_id: q.id,
+        saved: true,
+        blank: !code.trim(),
+      };
+    }),
+  );
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          error: `${label} timed out.`,
+          service_down: true,
+          timeout: true,
+        }),
+      ms,
+    );
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+async function finalizeOneCodingQuestion(q) {
+  const state =
+    document.getElementById(`card-${q.id}`)
+      ?.querySelector(".save-state");
+
+  if (state) {
+    state.dataset.ok = "0";
+    state.textContent = "final coding check…";
+  }
+
+  let res = null;
+
+  for (let n = 1; n <= 2; n++) {
+    res = await withTimeout(
+      callFunction("run-code", {
+        attempt_id: attempt.id,
+        question_id: q.id,
+        mode: "finalize",
+      }),
+      FINAL_CODE_TIMEOUT_MS,
+      `Coding question ${q.id}`,
+    );
+
+    if (!res?.error) break;
+
+    console.warn(
+      `[final coding] question=${q.id} try=${n}`,
+      res.error,
+    );
+
+    if (n < 2) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  if (res?.error) {
+    if (state) {
+      state.dataset.ok = "0";
+      state.textContent = "final check unavailable";
+    }
+
+    return {
+      question_id: q.id,
+      ok: false,
+      error: res.error,
+    };
+  }
+
+  if (res.blank_code) {
+    if (state) {
+      state.dataset.ok = "0";
+      state.textContent = `blank · 0/${res.total ?? 0}`;
+    }
+
+    return {
+      question_id: q.id,
+      ok: true,
+      blank: true,
+      passed: 0,
+      total: Number(res.total ?? 0),
+    };
+  }
+
+  if (state) {
+    state.dataset.ok = res.all_passed ? "1" : "0";
+    state.textContent =
+      `submitted · ${res.passed ?? 0}/${res.total ?? 0}`;
+  }
+
+  markDone(q.id);
+
+  return {
+    question_id: q.id,
+    ok: true,
+    blank: false,
+    passed: Number(res.passed ?? 0),
+    total: Number(res.total ?? 0),
+  };
+}
+
+async function submitAllCodingForMarks(onProgress = () => {}) {
+  const coding = questions.filter((q) => q.qtype === "coding");
+
+  if (!coding.length) {
+    return {
+      total: 0,
+      evaluated: 0,
+      blank: 0,
+      failed: 0,
+      results: [],
+    };
+  }
+
+  let completed = 0;
+
+  const results = await Promise.all(
+    coding.map(async (q) => {
+      const result = await finalizeOneCodingQuestion(q);
+      completed++;
+      onProgress(completed, coding.length);
+      return result;
+    }),
+  );
+
+  return {
+    total: coding.length,
+    evaluated: results.filter((r) => r.ok && !r.blank).length,
+    blank: results.filter((r) => r.ok && r.blank).length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+  };
+}
+
+function showSubmissionStatus(text) {
+  const btn = document.getElementById("finishBtn");
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Submitting…";
+  }
+
+  const banner = document.getElementById("saveBanner");
+
+  if (banner) {
+    banner.className = "notice";
+    banner.innerHTML = `<b>Finalizing paper</b><br>${escapeHtml(text)}`;
+    banner.classList.remove("hidden");
   }
 }
 
@@ -785,24 +999,90 @@ function startHeartbeat() {
    10 · SUBMIT
    ══════════════════════════════════════════════════════════════════════ */
 async function finish(auto) {
-  if (finished) return;
+  if (finished || submissionInProgress) return;
+
   if (!auto) {
     const left = questions.filter((q) => !answered[q.id]).length;
-    const warning = left ? `${left} question${left === 1 ? " is" : "s are"} still blank.\n\n` : "";
-    if (!confirm(`${warning}Submit the paper? Answers cannot be changed after this.`)) return;
+    const warning = left
+      ? `${left} question${left === 1 ? " is" : "s are"} still blank.\n\n`
+      : "";
+
+    const codingCount =
+      questions.filter((q) => q.qtype === "coding").length;
+
+    const codingNote = codingCount
+      ? `\n\nAll ${codingCount} coding question${codingCount === 1 ? "" : "s"} will be automatically submitted for marks using the latest saved code.`
+      : "";
+
+    if (
+      !confirm(
+        `${warning}Submit the paper? Answers cannot be changed after this.${codingNote}`,
+      )
+    ) {
+      return;
+    }
   }
+
+  submissionInProgress = true;
   finished = true;
+
   clearTimeout(lockTimer);
   showCover(false);
 
-  await new Promise((r) => setTimeout(r, AUTOSAVE_DELAY_MS + 500));   // let saves land
-  const { data: score, error } = await supabase.rpc("grade_attempt", { p_attempt_id: attempt.id });
-  if (error) console.error("[grade_attempt]", error);
+  showSubmissionStatus("Saving the latest coding answers…");
+
+  await flushCodingDrafts();
+
+  await new Promise((r) =>
+    setTimeout(r, AUTOSAVE_DELAY_MS + 450)
+  );
+
+  const codingCount =
+    questions.filter((q) => q.qtype === "coding").length;
+
+  let codingSummary = {
+    total: 0,
+    evaluated: 0,
+    blank: 0,
+    failed: 0,
+    results: [],
+  };
+
+  if (codingCount) {
+    showSubmissionStatus(
+      `Evaluating coding questions 0/${codingCount}…`,
+    );
+
+    codingSummary = await submitAllCodingForMarks(
+      (done, total) => {
+        showSubmissionStatus(
+          `Evaluating coding questions ${done}/${total}…`,
+        );
+      },
+    );
+  }
+
+  showSubmissionStatus("Finalizing objective and coding marks…");
+
+  const { data: score, error } =
+    await supabase.rpc("grade_attempt", {
+      p_attempt_id: attempt.id,
+    });
+
+  if (error) {
+    console.error("[grade_attempt]", error);
+  }
+
   stopProctoring();
-  showReceipt(auto, error ? null : score);
+
+  showReceipt(
+    auto,
+    error ? null : score,
+    codingSummary,
+  );
 }
 
-function showReceipt(auto, score) {
+function showReceipt(auto, score, codingSummary = null) {
   const switches = attentionCount();
   document.body.innerHTML = `
     <div class="gate">
@@ -814,6 +1094,12 @@ function showReceipt(auto, score) {
         ${score === null || score === undefined
           ? `<p class="meta">Marking will be completed by your department.</p>`
           : `<p class="meta">Objective and coding marks: <b>${score}</b>. Long answers are marked by your teacher.</p>`}
+        ${codingSummary?.failed
+          ? `<p class="notice warn" style="margin-top:.8rem">
+               ${codingSummary.failed} coding question${codingSummary.failed === 1 ? "" : "s"}
+               could not be automatically evaluated. The saved code is preserved for review.
+             </p>`
+          : ""}
         ${runningMode === "browser" && switches
           ? `<p class="meta" style="margin-top:.6rem;color:var(--ink-3)">${switches} switch${switches === 1 ? "" : "es"} away were recorded.</p>`
           : ""}
