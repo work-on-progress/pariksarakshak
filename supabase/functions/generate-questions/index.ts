@@ -18,7 +18,7 @@
 // - Objective answers are cross-checked in a second AI pass.
 // - Generated MCQs must have a valid correct_key.
 // - Generated cloze questions must have answer keys.
-// - Coding questions must have 6 tests: first 4 visible, final 2 hidden.
+// - Coding questions receive 6 tests; the database later exposes only 1–2 random samples.
 // - Full uploaded text is accepted; no silent 4k/6k/60k truncation.
 // - Long notes/PDF text is split into chunks so the whole document contributes.
 // - Imported papers are chunked and all chunks are processed.
@@ -340,6 +340,15 @@ Deno.serve(async (req) => {
         },
         413,
       );
+    }
+
+    if (mode === "manual_enhance") {
+      const enhanced = await enhanceManualQuestion(
+        body,
+        providers,
+      );
+
+      return json(enhanced);
     }
 
     if (mode === "import") {
@@ -770,6 +779,460 @@ async function callOpenAICompatible(
       status: 503,
     };
   }
+}
+
+async function enhanceManualQuestion(
+  body: any,
+  providers: Provider[],
+) {
+  const raw =
+    body?.question &&
+    typeof body.question === "object"
+      ? body.question
+      : {};
+
+  const qtype =
+    ["mcq", "cloze", "long", "coding"].includes(
+      String(raw.qtype ?? ""),
+    )
+      ? String(raw.qtype)
+      : "long";
+
+  const strategy =
+    String(body.strategy ?? "enhance") === "fill_missing"
+      ? "fill_missing"
+      : "enhance";
+
+  const hasSeed =
+    [
+      raw.prompt,
+      raw.code_snippet,
+      raw.reference_solution,
+      raw.starter_code,
+      raw.reference_answer,
+    ].some((x) => String(x ?? "").trim()) ||
+    (Array.isArray(raw.options) && raw.options.some((x: any) => String(x ?? "").trim())) ||
+    (Array.isArray(raw.cloze_answers) && raw.cloze_answers.some((x: any) => String(x ?? "").trim())) ||
+    (Array.isArray(raw.test_cases) && raw.test_cases.length > 0);
+
+  if (!hasSeed) {
+    return {
+      error:
+        "Type at least one rough question, code snippet, answer, option or test case first.",
+    };
+  }
+
+  const preferred = providers[0];
+
+  const prompt = manualEnhancePrompt(
+    raw,
+    qtype,
+    strategy,
+    body,
+  );
+
+  const res = await callProviderWithFallback(
+    preferred,
+    providers,
+    prompt,
+    "questions",
+    strategy === "fill_missing" ? 0.18 : 0.35,
+  );
+
+  if (!res.ok || !res.text) {
+    return {
+      error:
+        res.error ??
+        "No AI provider could enhance this question.",
+    };
+  }
+
+  const parsed = parseJsonLoose(res.text);
+
+  const candidateRaw =
+    Array.isArray(parsed?.questions)
+      ? parsed.questions[0]
+      : parsed?.question ?? parsed;
+
+  if (!candidateRaw || typeof candidateRaw !== "object") {
+    return {
+      error:
+        "AI returned an unreadable question. Your existing form was not changed.",
+    };
+  }
+
+  let candidate = tidyQuestion(
+    {
+      ...candidateRaw,
+      qtype,
+    },
+    "generate",
+    res.provider,
+  );
+
+  candidate = mergeManualQuestion(
+    raw,
+    candidate,
+    strategy,
+  );
+
+  let questions = [candidate];
+
+  if (candidate.qtype === "mcq" || candidate.qtype === "cloze") {
+    questions = await verifyObjectiveAnswers(
+      questions,
+      providers,
+      "generate",
+    );
+  }
+
+  if (candidate.qtype === "coding") {
+    questions = await repairCodingQuestions(
+      questions,
+      {
+        ...body,
+        language:
+          candidate.language ||
+          raw.language ||
+          body.language ||
+          "python",
+      },
+      providers,
+    );
+  }
+
+  candidate = mergeManualQuestion(
+    raw,
+    questions[0],
+    strategy,
+  );
+
+  return {
+    ok: true,
+    mode: "manual_enhance",
+    strategy,
+    provider: res.provider,
+    model: res.model,
+    question: stripInternalFields(candidate),
+  };
+}
+
+function manualEnhancePrompt(
+  raw: any,
+  qtype: string,
+  strategy: "enhance" | "fill_missing",
+  body: any,
+) {
+  const language =
+    String(raw.language ?? body.language ?? "python").trim() ||
+    "python";
+
+  const codingLevel =
+    CODING_LEVEL[
+      String(body.coding_level ?? "beginner")
+    ] ?? CODING_LEVEL.beginner;
+
+  const strategyRules =
+    strategy === "fill_missing"
+      ? `
+MODE: FILL MISSING FIELDS ONLY.
+- Copy every meaningful non-empty value from CURRENT DATA exactly.
+- Do not rewrite the existing prompt, options, answer, code, test input/output,
+  reference solution, reference answer or rubric.
+- Only complete fields that are blank, missing or structurally incomplete.
+`
+      : `
+MODE: ENHANCE AND COMPLETE.
+- Preserve the teacher's intent, facts, explicit answer, supplied code,
+  supplied reference solution and supplied test inputs/outputs.
+- You MAY improve grammar, clarity and exam wording of the prompt.
+- You MAY improve incomplete distractors/options and incomplete metadata.
+- Never silently change the intended correct answer if one was explicitly supplied.
+`;
+
+  return `
+You are an AI co-author inside a university examination platform.
+
+The faculty member is creating ONE manual question and may have typed only
+one rough line. Complete the form so they do not have to fill every field manually.
+
+QUESTION TYPE:
+${qtype}
+
+PROGRAMMING LANGUAGE:
+${language}
+
+CODING LEVEL:
+${codingLevel}
+
+${strategyRules}
+
+GENERAL RULES:
+- Return exactly ONE question.
+- Keep qtype exactly "${qtype}".
+- Use concise university-exam language.
+- explanation must explain why the answer/solution is correct in useful MULTILINE text.
+- Suggest suitable difficulty, marks, topic, subtopic, Bloom level, tags and estimated_minutes.
+- Do not put HTML in any returned field.
+- Do not expose internal reasoning; return only the completed exam-authoring data.
+
+TYPE-SPECIFIC RULES:
+
+MCQ:
+- Return exactly 4 useful options.
+- correct_key must be A, B, C or D.
+- Avoid obviously silly distractors.
+- For code-output/error/completion MCQs, preserve supplied code_snippet if present.
+- explanation should be 2–6 useful lines.
+
+CLOZE:
+- Use ____ for every blank.
+- cloze_answers must exactly match blank order.
+- explanation should explain the completed concept.
+
+LONG:
+- Generate a reference_answer and a practical marking_rubric.
+- marking_rubric should allocate the suggested marks across expected points.
+- Keep options, correct_key, cloze_answers and coding fields empty.
+
+CODING:
+- Write a precise problem statement.
+- Fill input_format, output_format and reasonable constraints_text.
+- starter_code should help the student start without solving the problem.
+- reference_solution must be a complete correct solution in ${language}.
+- Generate exactly 6 varied stdin/stdout test cases.
+- Set is_hidden=true on all generated tests; the platform later chooses
+  1–2 random student-visible samples server-side.
+- Include normal, boundary and edge cases where appropriate.
+- expected_out must exactly match the reference solution.
+- explanation should briefly explain the intended algorithm.
+- Keep MCQ/cloze/long-only fields empty.
+
+CURRENT DATA FROM FACULTY:
+${JSON.stringify(raw, null, 2)}
+
+Return ONLY JSON using this shape:
+{
+  "questions": [
+    {
+      "qtype": "${qtype}",
+      "mcq_kind": "theory",
+      "difficulty": "medium",
+      "prompt": "...",
+      "code_snippet": "",
+      "marks": 1,
+      "options": [],
+      "correct_key": "",
+      "explanation": "",
+      "cloze_answers": [],
+      "language": "${language}",
+      "func_signature": "",
+      "starter_code": "",
+      "input_format": "",
+      "output_format": "",
+      "constraints_text": "",
+      "reference_solution": "",
+      "reference_answer": "",
+      "marking_rubric": "",
+      "topic": "",
+      "subtopic": "",
+      "bloom_level": "",
+      "estimated_minutes": 5,
+      "tags": [],
+      "answer_basis": "generated",
+      "test_cases": [
+        {
+          "stdin": "",
+          "expected_out": "",
+          "is_hidden": true
+        }
+      ]
+    }
+  ]
+}
+`;
+}
+
+function meaningfulManualValue(value: any) {
+  if (value === null || value === undefined) return false;
+
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((x) => meaningfulManualValue(x));
+  }
+
+  return true;
+}
+
+function normalizedExistingOptions(value: any) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((x: any) =>
+      String(x ?? "")
+        .replace(/^\s*[A-D][.)]\s*/i, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function mergeManualTests(
+  existing: any,
+  generated: any,
+) {
+  const oldTests = normalizeCodingTests(existing);
+  const newTests = normalizeCodingTests(generated);
+
+  if (!oldTests.length) {
+    return newTests.slice(0, 6);
+  }
+
+  const out: any[] = [];
+  const seen = new Set<string>();
+
+  const add = (t: any) => {
+    const key =
+      `${String(t.stdin ?? "")}\u0000${String(t.expected_out ?? "")}`;
+
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    out.push({
+      stdin: String(t.stdin ?? ""),
+      expected_out: String(t.expected_out ?? ""),
+      is_hidden: true,
+    });
+  };
+
+  oldTests.forEach(add);
+  newTests.forEach(add);
+
+  return out.slice(0, 6);
+}
+
+function mergeManualQuestion(
+  original: any,
+  generated: any,
+  strategy: "enhance" | "fill_missing",
+) {
+  const out: any = {
+    ...generated,
+    qtype: original.qtype || generated.qtype,
+  };
+
+  const originalOptions =
+    normalizedExistingOptions(original.options);
+
+  const preserve = (field: string) => {
+    if (meaningfulManualValue(original[field])) {
+      out[field] = original[field];
+    }
+  };
+
+  // Always preserve fields where changing explicit faculty input can change
+  // the meaning/answer or break their provided code.
+  [
+    "qtype",
+    "code_snippet",
+    "language",
+    "starter_code",
+    "reference_solution",
+    "reference_answer",
+    "marking_rubric",
+  ].forEach(preserve);
+
+  if (
+    Array.isArray(original.cloze_answers) &&
+    original.cloze_answers.length
+  ) {
+    out.cloze_answers =
+      original.cloze_answers
+        .map((x: any) => String(x ?? "").trim())
+        .filter(Boolean);
+  }
+
+  if (
+    originalOptions.length >= 2 &&
+    strategy === "fill_missing"
+  ) {
+    out.options = originalOptions;
+  }
+
+  if (
+    meaningfulManualValue(original.correct_key) &&
+    originalOptions.length >= 2
+  ) {
+    const explicitKey = normalizeKey(
+      original.correct_key,
+      Math.max(originalOptions.length, out.options?.length ?? 0),
+    );
+
+    if (explicitKey) {
+      out.correct_key = explicitKey;
+    }
+  }
+
+  if (out.qtype === "coding") {
+    out.test_cases = mergeManualTests(
+      original.test_cases,
+      generated.test_cases,
+    );
+  }
+
+  if (strategy === "fill_missing") {
+    [
+      "prompt",
+      "mcq_kind",
+      "difficulty",
+      "marks",
+      "explanation",
+      "input_format",
+      "output_format",
+      "constraints_text",
+      "topic",
+      "subtopic",
+      "bloom_level",
+      "estimated_minutes",
+      "tags",
+    ].forEach(preserve);
+
+    if (originalOptions.length) {
+      const aiOptions =
+        normalizedExistingOptions(out.options);
+
+      const merged = [...originalOptions];
+
+      for (const option of aiOptions) {
+        if (merged.length >= 4) break;
+        if (!merged.includes(option)) merged.push(option);
+      }
+
+      out.options = merged.slice(0, 4);
+    }
+  }
+
+  // In enhance mode, preserve any explicit explanation if the teacher has
+  // already written one, but allow metadata/prompt wording to be improved.
+  if (
+    strategy === "enhance" &&
+    meaningfulManualValue(original.explanation)
+  ) {
+    out.explanation = original.explanation;
+  }
+
+  return tidyQuestion(
+    out,
+    "generate",
+    generated._provider || "gemini",
+  );
 }
 
 async function generateDistributed(
