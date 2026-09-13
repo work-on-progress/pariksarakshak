@@ -1883,3 +1883,325 @@ table.results input { width: 70px; font-family: var(--mono); padding: .25rem .4r
     grid-column: 2;
   }
 }
+
+
+/* =========================================================================
+   V14 — ADVANCED QUESTION AUTHORING
+   ========================================================================= */
+.field-help {
+  display: block;
+  margin-top: .35rem;
+  color: var(--ink-3);
+  font-size: .76rem;
+  line-height: 1.45;
+}
+
+.rich-source {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+  clip-path: inset(50%) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.rich-editor-shell {
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.rich-editor-toolbar {
+  display: flex;
+  gap: .25rem;
+  flex-wrap: wrap;
+  padding: .45rem;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--card-2);
+}
+
+.rich-tool {
+  min-height: 30px;
+  padding: .26rem .5rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink-2);
+  cursor: pointer;
+  font: 600 .72rem var(--body);
+}
+
+.rich-tool:hover {
+  border-color: var(--blue);
+  color: var(--blue-deep);
+  background: var(--blue-wash);
+}
+
+.rich-editor-surface {
+  min-height: 125px;
+  max-height: 420px;
+  overflow: auto;
+  padding: .75rem .85rem;
+  color: var(--ink);
+  line-height: 1.6;
+  outline: none;
+}
+
+.rich-editor-surface:focus {
+  box-shadow: inset 0 0 0 2px var(--blue-wash);
+}
+
+.rich-editor-surface p,
+.rich-editor-surface ul,
+.rich-editor-surface ol,
+.rich-editor-surface blockquote,
+.student-preview-rich p,
+.student-preview-rich ul,
+.student-preview-rich ol,
+.student-preview-rich blockquote,
+.qcard .prompt p,
+.qcard .prompt ul,
+.qcard .prompt ol,
+.qcard .prompt blockquote {
+  margin-top: 0;
+  margin-bottom: .75rem;
+}
+
+.rich-editor-surface pre,
+.student-preview-rich pre,
+.qcard .prompt pre {
+  overflow-x: auto;
+  padding: .7rem .8rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card-2);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+}
+
+.rich-editor-surface code,
+.student-preview-rich code,
+.qcard .prompt code {
+  padding: .08rem .28rem;
+  border-radius: 4px;
+  background: var(--card-2);
+  font-family: var(--mono);
+}
+
+.rich-editor-surface blockquote,
+.student-preview-rich blockquote,
+.qcard .prompt blockquote {
+  margin-left: 0;
+  padding-left: .8rem;
+  border-left: 3px solid var(--blue);
+  color: var(--ink-2);
+}
+
+.question-meta-fields {
+  margin-top: .75rem;
+}
+
+.draft-meta-edit {
+  display: grid;
+  grid-template-columns: .8fr .55fr 1fr 1.2fr;
+  gap: .5rem;
+  margin-bottom: .75rem;
+}
+
+.draft-meta-edit label > span,
+.draft-coding-grid label > span {
+  display: block;
+  margin-bottom: .25rem;
+  color: var(--ink-3);
+  font: .62rem var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.draft-option-edit {
+  flex: 1;
+  min-width: 0;
+  padding: .38rem .55rem !important;
+}
+
+.draft-coding-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .7rem;
+}
+
+.coding-tests-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .7rem;
+  margin: 1rem 0 .55rem;
+  padding: .7rem .8rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+}
+
+.coding-tests-head > div {
+  display: grid;
+  gap: .15rem;
+}
+
+.coding-tests-head span {
+  color: var(--ink-3);
+  font-size: .78rem;
+}
+
+.advanced-testrow {
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto !important;
+  padding: .65rem;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+}
+
+.test-sample-state {
+  align-self: start;
+  padding: .25rem .42rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink-3);
+  font: .58rem var(--mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.test-sample-state.visible {
+  color: var(--pass);
+  border-color: color-mix(in srgb, var(--pass) 35%, var(--rule));
+  background: var(--pass-wash);
+}
+
+.testrow-tools {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+}
+
+.question-preview-dialog {
+  width: min(880px, 94vw);
+  max-height: 90vh;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: transparent;
+}
+
+.question-preview-dialog::backdrop {
+  background: rgba(10,14,20,.7);
+  backdrop-filter: blur(6px);
+}
+
+.question-preview-panel {
+  max-height: 88vh;
+  overflow: auto;
+}
+
+.student-preview-rich {
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.student-preview-code-spec,
+.coding-spec {
+  display: grid;
+  gap: .65rem;
+  margin: .85rem 0 1rem;
+}
+
+.student-preview-code-spec > div,
+.coding-spec > div {
+  padding: .7rem .8rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--card-2);
+}
+
+.student-preview-code-spec b,
+.coding-spec b {
+  display: block;
+  margin-bottom: .35rem;
+  color: var(--ink-2);
+  font-size: .78rem;
+}
+
+.student-preview-code-spec pre,
+.coding-spec pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font: .8rem/1.5 var(--mono);
+}
+
+.coding-samples {
+  display: grid;
+  gap: .6rem;
+  margin: .85rem 0 1rem;
+}
+
+.coding-samples:empty {
+  display: none;
+}
+
+.coding-samples-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.coding-samples-heading span {
+  color: var(--ink-3);
+  font-size: .72rem;
+}
+
+.sample-test-card {
+  padding: .75rem;
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  background: var(--card-2);
+}
+
+.sample-test-card > b {
+  display: block;
+  margin-bottom: .55rem;
+  color: var(--blue-deep);
+  font-size: .8rem;
+}
+
+.sample-test-compare {
+  grid-template-columns: 1fr 1fr !important;
+}
+
+@media (max-width: 800px) {
+  .draft-meta-edit,
+  .draft-coding-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .advanced-testrow {
+    grid-template-columns: 1fr !important;
+  }
+
+  .testrow-tools {
+    grid-column: 1;
+  }
+
+  .coding-tests-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sample-test-compare {
+    grid-template-columns: 1fr !important;
+  }
+}
