@@ -350,26 +350,47 @@ function renderPaper(saved) {
 }
 
 function buildMcq(q, body, state, prior) {
-  let options = Array.isArray(q.options) ? q.options : Object.values(q.options ?? {});
-  if (exam.shuffle_options) options = shuffle(options, `${q.id}:${user.id}:o`);
+  // Stable A/B/C/D keys are assigned from the ORIGINAL option position
+  // before display-order shuffling. This fixes correct visible selections
+  // being saved as the first letter of option text.
+  let options = (
+    Array.isArray(q.options)
+      ? q.options
+      : Object.values(q.options ?? {})
+  ).map((text, index) => ({
+    key: String.fromCharCode(65 + index),
+    text: String(text ?? ""),
+  }));
 
-  options.forEach((opt) => {
-    const key = String(opt).trim().charAt(0).toUpperCase();
+  if (exam.shuffle_options) {
+    options = shuffle(options, `${q.id}:${user.id}:o`);
+  }
+
+  options.forEach(({ key, text }) => {
     const row = document.createElement("label");
     row.className = "choice";
+
     const input = document.createElement("input");
     input.type = "radio";
     input.name = `q-${q.id}`;
     input.value = key;
-    if (prior?.answer_text === key) { input.checked = true; row.classList.add("picked"); }
+
+    if (String(prior?.answer_text ?? "").trim().toUpperCase() === key) {
+      input.checked = true;
+      row.classList.add("picked");
+    }
+
     const span = document.createElement("span");
-    span.textContent = opt;
+    span.textContent = text;
+
     row.append(input, span);
+
     input.onchange = () => {
       body.querySelectorAll(".choice").forEach((c) => c.classList.remove("picked"));
       row.classList.add("picked");
       queueSave(q.id, state, { answer_text: key });
     };
+
     body.appendChild(row);
   });
 }
