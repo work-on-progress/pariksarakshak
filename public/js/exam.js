@@ -652,9 +652,18 @@ function buildCoding(q, body, state, prior) {
     theme: "material-darker",
     lineNumbers: true,
     indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    smartIndent: true,
     matchBrackets: true,
   });
-  cm.setValue(prior?.code_submitted ?? q.starter_code ?? "");
+
+  setEditorAtProperStart(
+    cm,
+    prior?.code_submitted ?? q.starter_code ?? "",
+    q.language,
+  );
+
   cm.setSize("100%", "320px");
   editors[q.id] = cm;
 
@@ -672,7 +681,11 @@ function buildCoding(q, body, state, prior) {
   submitBtn.onclick = () => runCode(q.id, "submit", verdict, [runBtn, submitBtn], state);
   resetBtn.onclick = () => {
     if (confirm("Put the starter code back? Your current code will be lost.")) {
-      cm.setValue(q.starter_code ?? "");
+      setEditorAtProperStart(
+        cm,
+        q.starter_code ?? "",
+        q.language,
+      );
     }
   };
 }
@@ -681,6 +694,104 @@ const cmMode = (lang) => ({
   python: "python", javascript: "javascript",
   c: "text/x-csrc", cpp: "text/x-c++src", java: "text/x-java",
 }[lang] ?? "python");
+
+
+function normalizePythonSourceForEditor(value, language = "python") {
+  let text = String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\uFEFF/, "");
+
+  // Remove accidental empty lines before/after pasted code.
+  text = text
+    .replace(/^(?:[ \t]*\n)+/, "")
+    .replace(/(?:\n[ \t]*)+$/, "");
+
+  if (String(language || "python").toLowerCase() !== "python") {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  const nonEmpty = lines.filter((line) => line.trim().length > 0);
+
+  if (!nonEmpty.length) return text;
+
+  // Find the exact whitespace prefix shared by every non-empty line.
+  // Example:
+  //     a = 1
+  //     if a:
+  //         print(a)
+  //
+  // becomes:
+  // a = 1
+  // if a:
+  //     print(a)
+  //
+  // Relative indentation inside if/for/while/functions is preserved.
+  const prefixes = nonEmpty.map(
+    (line) => line.match(/^[ \t]*/)?.[0] ?? "",
+  );
+
+  let common = prefixes[0];
+
+  for (let i = 1; i < prefixes.length && common; i++) {
+    const next = prefixes[i];
+    let j = 0;
+
+    while (
+      j < common.length &&
+      j < next.length &&
+      common[j] === next[j]
+    ) {
+      j++;
+    }
+
+    common = common.slice(0, j);
+  }
+
+  if (!common) return text;
+
+  return lines
+    .map((line) =>
+      line.trim().length && line.startsWith(common)
+        ? line.slice(common.length)
+        : line
+    )
+    .join("\n");
+}
+
+function setEditorAtProperStart(cm, value, language = "python") {
+  const normalized =
+    normalizePythonSourceForEditor(value, language);
+
+  cm.setValue(normalized);
+  cm.setCursor({ line: 0, ch: 0 });
+  cm.scrollTo(0, 0);
+
+  return normalized;
+}
+
+function normalizeEditorBeforeRun(cm, language = "python") {
+  const before = cm.getValue();
+  const after =
+    normalizePythonSourceForEditor(before, language);
+
+  if (after !== before) {
+    const cursor = cm.getCursor();
+    cm.setValue(after);
+
+    const lastLine = Math.max(0, cm.lineCount() - 1);
+    cm.setCursor({
+      line: Math.min(cursor.line, lastLine),
+      ch: Math.max(0, cursor.ch),
+    });
+  }
+
+  return {
+    code: after,
+    changed: after !== before,
+  };
+}
+
 
 /* ══════════════════════════════════════════════════════════════════════
    EXAM EXPERIENCE V2 — PROGRESS + CURRENT QUESTION
@@ -1482,10 +1593,22 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
     ? "Running the visible tests…"
     : "Running every test on the server…";
 
+  const q = questions.find((item) => item.id === question_id);
+  const prepared = normalizeEditorBeforeRun(
+    editors[question_id],
+    q?.language ?? "python",
+  );
+
   const res = await callFunction("run-code", {
-    attempt_id: attempt.id, question_id,
-    code: editors[question_id].getValue(), mode,
+    attempt_id: attempt.id,
+    question_id,
+    code: prepared.code,
+    mode,
   });
+
+  if (prepared.changed) {
+    res.source_normalized = true;
+  }
 
   buttons.forEach((b) => (b.disabled = false));
 
@@ -1505,6 +1628,15 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
   summary.className = "test-summary";
   summary.textContent = `${res.passed} of ${res.total} tests passed${res.all_passed ? " ✓" : ""}`;
   verdict.appendChild(summary);
+
+  if (res.source_normalized) {
+    const fix = document.createElement("div");
+    fix.className = "notice ok";
+    fix.style.marginTop = ".55rem";
+    fix.textContent =
+      "Python indentation was aligned to the proper starting column before running.";
+    verdict.appendChild(fix);
+  }
 
   if (visible.length) {
     const grid = document.createElement("div");
