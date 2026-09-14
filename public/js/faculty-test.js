@@ -328,10 +328,18 @@ function buildCoding(q, body) {
     theme: "material-darker",
     lineNumbers: true,
     indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    smartIndent: true,
     matchBrackets: true,
   });
 
-  cm.setValue(q.starter_code || "");
+  setEditorAtProperStart(
+    cm,
+    q.starter_code || "",
+    q.language,
+  );
+
   cm.setSize("100%", "320px");
   editors[q.id] = cm;
 
@@ -350,7 +358,11 @@ function buildCoding(q, body) {
 
   resetBtn.onclick = () => {
     if (!confirm("Put the starter code back?")) return;
-    cm.setValue(q.starter_code || "");
+    setEditorAtProperStart(
+      cm,
+      q.starter_code || "",
+      q.language,
+    );
   };
 }
 
@@ -417,7 +429,11 @@ function renderVisibleSamples(q, body) {
 }
 
 async function runCoding(q, mode, verdict, buttons) {
-  const code = editors[q.id]?.getValue() || "";
+  const prepared = normalizeEditorBeforeRun(
+    editors[q.id],
+    q.language,
+  );
+  const code = prepared.code;
 
   if (!code.trim()) {
     showVerdictError(verdict, "Write some code first.");
@@ -439,6 +455,10 @@ async function runCoding(q, mode, verdict, buttons) {
     if (res.error) {
       showVerdictError(verdict, res.error);
       return null;
+    }
+
+    if (prepared.changed) {
+      res.source_normalized = true;
     }
 
     codingState[q.id] = res;
@@ -473,6 +493,13 @@ function renderCodingVerdict(box, res, mode) {
           : `<span class="meta">visible tests only</span>`
       }
     </div>
+    ${
+      res.source_normalized
+        ? `<div class="notice ok" style="margin:.55rem 0">
+             Python indentation was aligned to the proper starting column before running.
+           </div>`
+        : ""
+    }
   `;
 
   (res.results || []).forEach((r) => {
@@ -533,7 +560,11 @@ async function finishTest(auto = false) {
   });
 
   for (const q of questions.filter((x) => x.qtype === "coding")) {
-    const code = editors[q.id]?.getValue() || "";
+    const prepared = normalizeEditorBeforeRun(
+      editors[q.id],
+      q.language,
+    );
+    const code = prepared.code;
     answers[q.id] = code;
 
     if (!code.trim()) {
@@ -552,6 +583,10 @@ async function finishTest(auto = false) {
       code,
       mode: "submit",
     });
+
+    if (!res.error && prepared.changed) {
+      res.source_normalized = true;
+    }
 
     codingState[q.id] = res.error
       ? { error: res.error, passed: 0, total: 0, partial_marks: 0 }
@@ -897,6 +932,104 @@ function cmMode(lang) {
     java: "text/x-java",
   }[String(lang || "").toLowerCase()] || "python";
 }
+
+
+function normalizePythonSourceForEditor(value, language = "python") {
+  let text = String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\uFEFF/, "");
+
+  // Remove accidental empty lines before/after pasted code.
+  text = text
+    .replace(/^(?:[ \t]*\n)+/, "")
+    .replace(/(?:\n[ \t]*)+$/, "");
+
+  if (String(language || "python").toLowerCase() !== "python") {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  const nonEmpty = lines.filter((line) => line.trim().length > 0);
+
+  if (!nonEmpty.length) return text;
+
+  // Find the exact whitespace prefix shared by every non-empty line.
+  // Example:
+  //     a = 1
+  //     if a:
+  //         print(a)
+  //
+  // becomes:
+  // a = 1
+  // if a:
+  //     print(a)
+  //
+  // Relative indentation inside if/for/while/functions is preserved.
+  const prefixes = nonEmpty.map(
+    (line) => line.match(/^[ \t]*/)?.[0] ?? "",
+  );
+
+  let common = prefixes[0];
+
+  for (let i = 1; i < prefixes.length && common; i++) {
+    const next = prefixes[i];
+    let j = 0;
+
+    while (
+      j < common.length &&
+      j < next.length &&
+      common[j] === next[j]
+    ) {
+      j++;
+    }
+
+    common = common.slice(0, j);
+  }
+
+  if (!common) return text;
+
+  return lines
+    .map((line) =>
+      line.trim().length && line.startsWith(common)
+        ? line.slice(common.length)
+        : line
+    )
+    .join("\n");
+}
+
+function setEditorAtProperStart(cm, value, language = "python") {
+  const normalized =
+    normalizePythonSourceForEditor(value, language);
+
+  cm.setValue(normalized);
+  cm.setCursor({ line: 0, ch: 0 });
+  cm.scrollTo(0, 0);
+
+  return normalized;
+}
+
+function normalizeEditorBeforeRun(cm, language = "python") {
+  const before = cm.getValue();
+  const after =
+    normalizePythonSourceForEditor(before, language);
+
+  if (after !== before) {
+    const cursor = cm.getCursor();
+    cm.setValue(after);
+
+    const lastLine = Math.max(0, cm.lineCount() - 1);
+    cm.setCursor({
+      line: Math.min(cursor.line, lastLine),
+      ch: Math.max(0, cursor.ch),
+    });
+  }
+
+  return {
+    code: after,
+    changed: after !== before,
+  };
+}
+
 
 const ALLOWED = new Set([
   "P", "BR", "STRONG", "B", "EM", "I", "U",
