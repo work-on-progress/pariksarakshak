@@ -2625,3 +2625,167 @@ table.results input { width: 70px; font-family: var(--mono); padding: .25rem .4r
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =========================================================================
+   V18 — STUDENT CODE EDITOR: SAFE PYTHON INDENTATION + CLEAR ERRORS
+   ========================================================================= */
+
+.code-editor-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  min-height: 30px;
+  padding: .35rem .55rem;
+  border: 1px solid var(--rule);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--card-2);
+  font: .62rem var(--mono);
+}
+
+.code-editor-health {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.code-editor-health::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.code-editor-health.ok {
+  color: var(--pass);
+}
+
+.code-editor-health.warn {
+  color: var(--warn);
+}
+
+.code-editor-position {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.code-editor-shortcuts {
+  margin-left: auto;
+  font-size: .6rem;
+}
+
+.CodeMirror {
+  line-height: 1.55;
+}
+
+.CodeMirror-linebackground.cm-error-line {
+  background: rgba(222, 75, 75, .13);
+  box-shadow: inset 3px 0 0 var(--seal);
+}
+
+.code-running-state {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  color: var(--ink-2);
+}
+
+.code-running-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--blue);
+  animation: pulse 1s infinite;
+}
+
+.code-normalized-note {
+  margin-top: .55rem;
+  white-space: normal;
+}
+
+.code-friendly-error {
+  margin: .65rem 0;
+  padding: .8rem .9rem;
+  border: 1px solid rgba(222, 75, 75, .28);
+  border-left: 4px solid var(--seal);
+  border-radius: 10px;
+  background: rgba(222, 75, 75, .07);
+  white-space: normal;
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.code-friendly-error.indentation {
+  border-left-color: var(--warn);
+  background: rgba(216, 151, 55, .08);
+}
+
+.code-friendly-error strong {
+  display: block;
+  margin-bottom: .3rem;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: .9rem;
+}
+
+.code-friendly-error p {
+  margin: .2rem 0;
+  color: var(--ink-2);
+  font-size: .82rem;
+}
+
+.code-friendly-error .code-error-tip {
+  margin-top: .45rem;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.code-friendly-error details {
+  margin-top: .65rem;
+  padding-top: .55rem;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.code-friendly-error summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  font: .62rem var(--mono);
+}
+
+.code-friendly-error details pre {
+  max-height: 180px;
+  margin: .55rem 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--seal);
+  font: .72rem/1.5 var(--mono);
+}
+
+.verdict {
+  max-height: 430px;
+}
+
+.test-result-card .code-friendly-error {
+  margin-bottom: 0;
+}
+
+@media (max-width: 700px) {
+  .code-editor-status {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .2rem;
+  }
+
+  .code-editor-shortcuts {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .code-actions .btn {
+    min-height: 36px;
+  }
+}
