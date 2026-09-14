@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
     const questionId =
       String(body.question_id ?? "");
 
-    const code =
+    let code =
       typeof body.code === "string"
         ? body.code
         : "";
@@ -179,6 +179,18 @@ Deno.serve(async (req) => {
     if (!languageId) {
       return json(
         { error: `Language not supported: ${language}` },
+        400,
+      );
+    }
+
+    const codeBeforeNormalization = code;
+    code = normalizeSourceCode(code, language);
+    const sourceNormalized =
+      code !== codeBeforeNormalization;
+
+    if (!code.trim()) {
+      return json(
+        { error: "Write some code first." },
         400,
       );
     }
@@ -300,6 +312,7 @@ Deno.serve(async (req) => {
       partial_marks:
         mode === "submit" ? partialMarks : null,
       max_marks: Number(q.marks || 0),
+      source_normalized: sourceNormalized,
       results,
     });
   } catch (e) {
@@ -485,6 +498,61 @@ function judge0Headers() {
   }
 
   return headers;
+}
+
+
+function normalizeSourceCode(
+  value: unknown,
+  language: string,
+) {
+  let text = String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\uFEFF/, "");
+
+  text = text
+    .replace(/^(?:[ \t]*\n)+/, "")
+    .replace(/(?:\n[ \t]*)+$/, "");
+
+  if (String(language || "").toLowerCase() !== "python") {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  const nonEmpty =
+    lines.filter((line) => line.trim().length > 0);
+
+  if (!nonEmpty.length) return text;
+
+  const prefixes = nonEmpty.map(
+    (line) => line.match(/^[ \t]*/)?.[0] ?? "",
+  );
+
+  let common = prefixes[0];
+
+  for (let i = 1; i < prefixes.length && common; i++) {
+    const next = prefixes[i];
+    let j = 0;
+
+    while (
+      j < common.length &&
+      j < next.length &&
+      common[j] === next[j]
+    ) {
+      j++;
+    }
+
+    common = common.slice(0, j);
+  }
+
+  if (!common) return text;
+
+  return lines
+    .map((line) =>
+      line.trim().length && line.startsWith(common)
+        ? line.slice(common.length)
+        : line
+    )
+    .join("\n");
 }
 
 function normalizeOutput(value: unknown) {
