@@ -427,6 +427,12 @@ Deno.serve(async (req) => {
           expected,
           got: actual,
           stderr: outcome.stderr,
+          diagnostic: pass
+            ? null
+            : buildFriendlyDiagnostic(
+                outcome.stderr,
+                language,
+              ),
           exit_code: outcome.exitCode,
           runner: outcome.runner,
           status: outcome.statusDescription,
@@ -726,6 +732,34 @@ function judge0Headers() {
 }
 
 
+function expandLeadingTabs(
+  line: string,
+  tabSize = 4,
+) {
+  let column = 0;
+  let i = 0;
+
+  while (i < line.length) {
+    const ch = line[i];
+
+    if (ch === " ") {
+      column++;
+      i++;
+      continue;
+    }
+
+    if (ch === "\t") {
+      column += tabSize - (column % tabSize);
+      i++;
+      continue;
+    }
+
+    break;
+  }
+
+  return " ".repeat(column) + line.slice(i);
+}
+
 function normalizeSourceCode(
   value: unknown,
   language: string,
@@ -742,42 +776,165 @@ function normalizeSourceCode(
     return text;
   }
 
-  const lines = text.split("\n");
+  let lines = text
+    .split("\n")
+    .map((line) => expandLeadingTabs(line, 4));
+
   const nonEmpty =
     lines.filter((line) => line.trim().length > 0);
 
-  if (!nonEmpty.length) return text;
-
-  const prefixes = nonEmpty.map(
-    (line) => line.match(/^[ \t]*/)?.[0] ?? "",
-  );
-
-  let common = prefixes[0];
-
-  for (let i = 1; i < prefixes.length && common; i++) {
-    const next = prefixes[i];
-    let j = 0;
-
-    while (
-      j < common.length &&
-      j < next.length &&
-      common[j] === next[j]
-    ) {
-      j++;
-    }
-
-    common = common.slice(0, j);
+  if (!nonEmpty.length) {
+    return lines.join("\n");
   }
 
-  if (!common) return text;
+  const commonIndent = Math.min(
+    ...nonEmpty.map(
+      (line) => line.match(/^ */)?.[0].length ?? 0,
+    ),
+  );
 
-  return lines
-    .map((line) =>
-      line.trim().length && line.startsWith(common)
-        ? line.slice(common.length)
+  if (commonIndent > 0) {
+    lines = lines.map((line) =>
+      line.trim().length
+        ? line.slice(Math.min(commonIndent, line.length))
         : line
-    )
-    .join("\n");
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function buildFriendlyDiagnostic(
+  stderr: unknown,
+  language: string,
+) {
+  const raw = String(stderr ?? "").trim();
+  if (!raw) return null;
+
+  const lineMatch =
+    raw.match(/File\s+"[^"]+",\s+line\s+(\d+)/i) ??
+    raw.match(/\bline\s+(\d+)\b/i);
+
+  const line =
+    lineMatch ? Number(lineMatch[1]) : null;
+
+  const python =
+    String(language || "").toLowerCase() === "python";
+
+  if (python) {
+    if (/TabError:\s*inconsistent use of tabs and spaces/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "Indentation uses both tabs and spaces",
+        message:
+          `Python found mixed indentation${line ? ` near line ${line}` : ""}.`,
+        tip:
+          "Use 4 spaces for indentation. In PariksaRakshak, press Tab to insert spaces or click Fix indentation.",
+      };
+    }
+
+    if (/IndentationError:\s*unexpected indent/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "This line starts too far to the right",
+        message:
+          `Python found unexpected indentation${line ? ` on line ${line}` : ""}.`,
+        tip:
+          "Move the line left with Shift+Tab. Top-level code should start at column 1.",
+      };
+    }
+
+    if (/IndentationError:\s*expected an indented block/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "Python expected an indented block",
+        message:
+          `Code after if / for / while / def / else needs indentation${line ? ` near line ${line}` : ""}.`,
+        tip:
+          "Press Tab once on the line that belongs inside the block.",
+      };
+    }
+
+    if (/IndentationError:\s*unindent does not match/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "Indentation levels do not match",
+        message:
+          `A line moved left to a different indentation level${line ? ` near line ${line}` : ""}.`,
+        tip:
+          "Use Tab and Shift+Tab so block levels stay consistent.",
+      };
+    }
+
+    if (/SyntaxError:/i.test(raw)) {
+      const match =
+        raw.match(/SyntaxError:\s*([^\n]+)/i);
+
+      return {
+        kind: "syntax",
+        line,
+        title: "Python syntax error",
+        message:
+          `${line ? `Check line ${line}. ` : ""}${match?.[1] ?? "Python could not parse this line."}`,
+        tip:
+          "Check brackets, quotes, colons (:), commas and spelling around the highlighted line.",
+      };
+    }
+
+    const patterns: Array<[RegExp, string, string]> = [
+      [/NameError:\s*([^\n]+)/i,
+        "Unknown variable or function name",
+        "Check spelling and make sure the name is created before you use it."],
+      [/TypeError:\s*([^\n]+)/i,
+        "Wrong type of value used",
+        "Check the values used in the operation or function call."],
+      [/ValueError:\s*([^\n]+)/i,
+        "Input/value could not be converted",
+        "Check input parsing such as int(input()) and the problem's input format."],
+      [/IndexError:\s*([^\n]+)/i,
+        "Index is outside the valid range",
+        "Check loop limits and indexes. Python indexes are 0 to length - 1."],
+      [/ZeroDivisionError:\s*([^\n]+)/i,
+        "Division by zero",
+        "Make sure the denominator is not zero before dividing."],
+      [/EOFError:\s*([^\n]+)/i,
+        "Program requested too much input",
+        "Match the number of input() calls to the problem's input format."],
+      [/ModuleNotFoundError:\s*([^\n]+)/i,
+        "Imported module is not available",
+        "Use only modules/features allowed by the question."],
+    ];
+
+    for (const [pattern, title, tip] of patterns) {
+      const match = raw.match(pattern);
+      if (match) {
+        return {
+          kind: "runtime",
+          line,
+          title,
+          message:
+            `${line ? `Line ${line}: ` : ""}${match[1]}`,
+          tip,
+        };
+      }
+    }
+  }
+
+  return {
+    kind: "runtime",
+    line,
+    title: "Program error",
+    message:
+      line
+        ? `The program stopped near line ${line}.`
+        : "The program could not complete this test.",
+    tip:
+      "Read the technical details, correct the code and run the visible tests again.",
+  };
 }
 
 function normalizeOutput(value: unknown) {
