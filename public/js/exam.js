@@ -635,17 +635,25 @@ function buildCoding(q, body, state, prior) {
     { className: "btn ghost small", textContent: "Run visible tests" });
   const submitBtn = Object.assign(document.createElement("button"),
     { className: "btn pass small", textContent: "Submit for marks" });
+  const fixIndentBtn = Object.assign(document.createElement("button"),
+    { className: "btn ghost small", textContent: "Fix indentation" });
   const resetBtn = Object.assign(document.createElement("button"),
     { className: "btn ghost small", textContent: "Reset code" });
   const hint = Object.assign(document.createElement("span"),
-    { className: "meta", textContent: "partial marks available for passed tests" });
+    {
+      className: "meta code-editor-shortcuts",
+      textContent: "Tab = 4 spaces · Shift+Tab = move left · Ctrl+Enter = run",
+    });
   hint.style.color = "var(--ink-3)";
-  actions.append(runBtn, submitBtn, resetBtn, hint);
+  actions.append(runBtn, submitBtn, fixIndentBtn, resetBtn, hint);
+
+  const editorStatus = document.createElement("div");
+  editorStatus.className = "code-editor-status";
 
   const verdict = document.createElement("div");
   verdict.className = "verdict hidden";
 
-  body.append(wrap, actions, verdict);
+  body.append(wrap, editorStatus, actions, verdict);
 
   const cm = CodeMirror.fromTextArea(ta, {
     mode: cmMode(q.language),
@@ -667,18 +675,47 @@ function buildCoding(q, body, state, prior) {
   cm.setSize("100%", "320px");
   editors[q.id] = cm;
 
-  cm.on("change", () =>
+  installStudentCodeEditorKeys(cm, q.language, runBtn);
+  updateCodeEditorStatus(cm, editorStatus, q.language);
+
+  cm.on("cursorActivity", () =>
+    updateCodeEditorStatus(cm, editorStatus, q.language)
+  );
+
+  cm.on("change", () => {
+    updateCodeEditorStatus(cm, editorStatus, q.language);
     queueSave(
       q.id,
       state,
       { code_submitted: cm.getValue() },
       0,
       CODING_AUTOSAVE_DELAY_MS,
-    )
-  );
+    );
+  });
 
   runBtn.onclick = () => runCode(q.id, "run", verdict, [runBtn, submitBtn], state);
   submitBtn.onclick = () => runCode(q.id, "submit", verdict, [runBtn, submitBtn], state);
+
+  fixIndentBtn.onclick = () => {
+    const before = cm.getValue();
+    const fixed = normalizePythonSourceForEditor(before, q.language);
+
+    if (fixed !== before) {
+      cm.setValue(fixed);
+      cm.setCursor({ line: 0, ch: 0 });
+      cm.scrollTo(0, 0);
+      updateCodeEditorStatus(cm, editorStatus, q.language);
+
+      verdict.classList.remove("hidden");
+      verdict.innerHTML =
+        `<div class="notice ok">Indentation cleaned: leading tabs were converted to spaces and accidental whole-program indentation was removed.</div>`;
+    } else {
+      verdict.classList.remove("hidden");
+      verdict.innerHTML =
+        `<div class="notice ok">Indentation already looks clean. The editor is using spaces.</div>`;
+    }
+  };
+
   resetBtn.onclick = () => {
     if (confirm("Put the starter code back? Your current code will be lost.")) {
       setEditorAtProperStart(
@@ -696,12 +733,38 @@ const cmMode = (lang) => ({
 }[lang] ?? "python");
 
 
+function expandPythonLeadingTabs(line, tabSize = 4) {
+  const text = String(line ?? "");
+  let column = 0;
+  let i = 0;
+
+  while (i < text.length) {
+    const ch = text[i];
+
+    if (ch === " ") {
+      column += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "\t") {
+      column += tabSize - (column % tabSize);
+      i += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return " ".repeat(column) + text.slice(i);
+}
+
 function normalizePythonSourceForEditor(value, language = "python") {
   let text = String(value ?? "")
     .replace(/\r\n?/g, "\n")
     .replace(/^\uFEFF/, "");
 
-  // Remove accidental empty lines before/after pasted code.
+  // Remove only accidental blank space around the whole program.
   text = text
     .replace(/^(?:[ \t]*\n)+/, "")
     .replace(/(?:\n[ \t]*)+$/, "");
@@ -710,53 +773,41 @@ function normalizePythonSourceForEditor(value, language = "python") {
     return text;
   }
 
-  const lines = text.split("\n");
+  // IMPORTANT:
+  // Convert every leading TAB to spaces using real 4-column tab stops.
+  // This fixes Python's:
+  //   TabError: inconsistent use of tabs and spaces in indentation
+  // without touching tab characters inside strings.
+  let lines = text
+    .split("\n")
+    .map((line) => expandPythonLeadingTabs(line, 4));
+
   const nonEmpty = lines.filter((line) => line.trim().length > 0);
+  if (!nonEmpty.length) return lines.join("\n");
 
-  if (!nonEmpty.length) return text;
-
-  // Find the exact whitespace prefix shared by every non-empty line.
-  // Example:
-  //     a = 1
-  //     if a:
-  //         print(a)
-  //
-  // becomes:
-  // a = 1
-  // if a:
-  //     print(a)
-  //
+  // If the whole pasted program is shifted right, move it back to column 1.
   // Relative indentation inside if/for/while/functions is preserved.
-  const prefixes = nonEmpty.map(
-    (line) => line.match(/^[ \t]*/)?.[0] ?? "",
+  const commonIndent = Math.min(
+    ...nonEmpty.map((line) => (line.match(/^ */)?.[0].length ?? 0)),
   );
 
-  let common = prefixes[0];
-
-  for (let i = 1; i < prefixes.length && common; i++) {
-    const next = prefixes[i];
-    let j = 0;
-
-    while (
-      j < common.length &&
-      j < next.length &&
-      common[j] === next[j]
-    ) {
-      j++;
-    }
-
-    common = common.slice(0, j);
+  if (commonIndent > 0) {
+    lines = lines.map((line) =>
+      line.trim().length
+        ? line.slice(Math.min(commonIndent, line.length))
+        : line
+    );
   }
 
-  if (!common) return text;
+  return lines.join("\n");
+}
 
-  return lines
-    .map((line) =>
-      line.trim().length && line.startsWith(common)
-        ? line.slice(common.length)
-        : line
-    )
-    .join("\n");
+function normalizePythonPasteLines(lines, language = "python") {
+  if (String(language || "python").toLowerCase() !== "python") {
+    return lines;
+  }
+
+  return lines.map((line) => expandPythonLeadingTabs(line, 4));
 }
 
 function setEditorAtProperStart(cm, value, language = "python") {
@@ -792,6 +843,299 @@ function normalizeEditorBeforeRun(cm, language = "python") {
   };
 }
 
+function installStudentCodeEditorKeys(cm, language, runButton) {
+  const isPython =
+    String(language || "python").toLowerCase() === "python";
+
+  if (isPython) {
+    cm.setOption("extraKeys", {
+      Tab(editor) {
+        if (editor.somethingSelected()) {
+          editor.indentSelection("add");
+          return;
+        }
+
+        const cursor = editor.getCursor();
+        const spaces = 4 - (cursor.ch % 4);
+        editor.replaceSelection(" ".repeat(spaces), "end", "+input");
+      },
+
+      "Shift-Tab"(editor) {
+        editor.indentSelection("subtract");
+      },
+
+      "Ctrl-Enter"() {
+        runButton?.click();
+      },
+
+      "Cmd-Enter"() {
+        runButton?.click();
+      },
+    });
+
+    // Pasted Python code can contain real tab characters even though the
+    // editor itself inserts spaces. Convert only LEADING pasted tabs.
+    cm.on("beforeChange", (_editor, change) => {
+      if (change.origin !== "paste" || !Array.isArray(change.text)) return;
+
+      const fixed = normalizePythonPasteLines(
+        change.text,
+        language,
+      );
+
+      const changed = fixed.some((line, i) => line !== change.text[i]);
+      if (changed) {
+        change.update(change.from, change.to, fixed, change.origin);
+      }
+    });
+  } else {
+    cm.setOption("extraKeys", {
+      "Ctrl-Enter"() {
+        runButton?.click();
+      },
+      "Cmd-Enter"() {
+        runButton?.click();
+      },
+    });
+  }
+}
+
+function updateCodeEditorStatus(cm, statusEl, language = "python") {
+  if (!statusEl) return;
+
+  const cursor = cm.getCursor();
+  const code = cm.getValue();
+  const python =
+    String(language || "python").toLowerCase() === "python";
+
+  const hasLeadingTabs = python &&
+    code.split("\n").some((line) => /^[ \t]*\t/.test(line));
+
+  statusEl.innerHTML = "";
+
+  const left = document.createElement("span");
+  left.className = hasLeadingTabs
+    ? "code-editor-health warn"
+    : "code-editor-health ok";
+
+  left.textContent = python
+    ? hasLeadingTabs
+      ? "Python · mixed tab indentation detected"
+      : "Python · 4-space indentation"
+    : String(language || "code").toUpperCase();
+
+  const right = document.createElement("span");
+  right.className = "code-editor-position";
+  right.textContent =
+    `Ln ${cursor.line + 1}, Col ${cursor.ch + 1}`;
+
+  statusEl.append(left, right);
+}
+
+function lastMatchingErrorLine(raw, prefix) {
+  const lines = String(raw ?? "")
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith(prefix)) return lines[i];
+  }
+
+  return "";
+}
+
+function friendlyCodeDiagnostic(stderr, language = "python") {
+  const raw = String(stderr ?? "").trim();
+  if (!raw) return null;
+
+  const lineMatch =
+    raw.match(/File\s+"[^"]+",\s+line\s+(\d+)/i) ||
+    raw.match(/\bline\s+(\d+)\b/i);
+
+  const line = lineMatch ? Number(lineMatch[1]) : null;
+  const python =
+    String(language || "python").toLowerCase() === "python";
+
+  if (python) {
+    if (/TabError:\s*inconsistent use of tabs and spaces/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "Indentation uses both tabs and spaces",
+        message:
+          `Python found mixed indentation${line ? ` near line ${line}` : ""}.`,
+        tip:
+          "Click “Fix indentation”, or use Tab/Shift+Tab in the editor. This editor uses 4 spaces for every indentation level.",
+      };
+    }
+
+    if (/IndentationError:\s*unexpected indent/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "This line starts too far to the right",
+        message:
+          `Python found an unexpected indentation${line ? ` on line ${line}` : ""}.`,
+        tip:
+          "Move that line left with Shift+Tab. Top-level statements should begin at column 1.",
+      };
+    }
+
+    if (/IndentationError:\s*expected an indented block/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "Python expected an indented block",
+        message:
+          `A line after if / for / while / def / else needs to be inside the block${line ? ` near line ${line}` : ""}.`,
+        tip:
+          "Place the cursor on the block line and press Tab once. The editor inserts 4 spaces.",
+      };
+    }
+
+    if (/IndentationError:\s*unindent does not match/i.test(raw)) {
+      return {
+        kind: "indentation",
+        line,
+        title: "Indentation levels do not match",
+        message:
+          `A line moved left to a column that does not match the surrounding Python block${line ? ` near line ${line}` : ""}.`,
+        tip:
+          "Use Tab and Shift+Tab instead of manually mixing spaces. Click “Fix indentation” first if code was pasted.",
+      };
+    }
+
+    if (/SyntaxError:/i.test(raw)) {
+      const last =
+        lastMatchingErrorLine(raw, "SyntaxError:") ||
+        "SyntaxError";
+
+      return {
+        kind: "syntax",
+        line,
+        title: "Python syntax error",
+        message:
+          `${line ? `Check line ${line}. ` : ""}${last.replace(/^SyntaxError:\s*/i, "")}`,
+        tip:
+          "Check brackets, quotes, colons (:), commas and spelling around the highlighted line.",
+      };
+    }
+
+    const runtimePatterns = [
+      ["NameError", "Unknown variable or function name",
+        "Check spelling and make sure the name is created before you use it."],
+      ["TypeError", "Wrong type of value used",
+        "Check the values used in the operation or function call."],
+      ["ValueError", "Input/value could not be converted",
+        "Check input parsing such as int(input()) and the expected input format."],
+      ["IndexError", "List/string index is outside the valid range",
+        "Check loop limits and indexes. Python indexes run from 0 to length - 1."],
+      ["ZeroDivisionError", "Division by zero",
+        "Check the denominator before dividing."],
+      ["EOFError", "Your program requested more input than the test provides",
+        "Match the number of input() calls to the problem's input format."],
+      ["ModuleNotFoundError", "Imported module is not available",
+        "Use only the language/library features allowed by the question."],
+    ];
+
+    for (const [name, title, tip] of runtimePatterns) {
+      if (raw.includes(`${name}:`)) {
+        const detail =
+          lastMatchingErrorLine(raw, `${name}:`) || name;
+
+        return {
+          kind: "runtime",
+          line,
+          title,
+          message:
+            `${line ? `Line ${line}: ` : ""}${detail.replace(new RegExp(`^${name}:\\s*`), "")}`,
+          tip,
+        };
+      }
+    }
+  }
+
+  return {
+    kind: "runtime",
+    line,
+    title: "Your program could not complete this test",
+    message:
+      line ? `The error was reported near line ${line}.` : "Check the technical details below.",
+    tip:
+      "Read the error message, correct the code, then run the visible tests again.",
+  };
+}
+
+const editorErrorLineHandles = {};
+
+function clearEditorErrorLine(questionId) {
+  const current = editorErrorLineHandles[questionId];
+  const cm = editors[questionId];
+
+  if (current && cm) {
+    try {
+      cm.removeLineClass(current, "background", "cm-error-line");
+    } catch {
+      // A previous edit may already have removed the line handle.
+    }
+  }
+
+  delete editorErrorLineHandles[questionId];
+}
+
+function highlightEditorErrorLine(questionId, lineNumber) {
+  const cm = editors[questionId];
+  if (!cm || !Number.isFinite(Number(lineNumber))) return;
+
+  clearEditorErrorLine(questionId);
+
+  const index = Math.max(
+    0,
+    Math.min(Number(lineNumber) - 1, cm.lineCount() - 1),
+  );
+
+  const handle =
+    cm.addLineClass(index, "background", "cm-error-line");
+
+  editorErrorLineHandles[questionId] = handle;
+  cm.scrollIntoView({ line: index, ch: 0 }, 90);
+  cm.setCursor({ line: index, ch: 0 });
+}
+
+function renderFriendlyDiagnostic(container, diagnostic, rawError = "") {
+  if (!diagnostic) return;
+
+  const box = document.createElement("div");
+  box.className = `code-friendly-error ${diagnostic.kind || "runtime"}`;
+
+  const title = document.createElement("strong");
+  title.textContent =
+    `${diagnostic.title}${diagnostic.line ? ` · line ${diagnostic.line}` : ""}`;
+
+  const message = document.createElement("p");
+  message.textContent = diagnostic.message || "";
+
+  const tip = document.createElement("p");
+  tip.className = "code-error-tip";
+  tip.textContent = `How to fix: ${diagnostic.tip || "Correct the code and try again."}`;
+
+  box.append(title, message, tip);
+
+  if (rawError) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    const pre = document.createElement("pre");
+
+    summary.textContent = "Technical error details";
+    pre.textContent = rawError;
+
+    details.append(summary, pre);
+    box.appendChild(details);
+  }
+
+  container.appendChild(box);
+}
 
 /* ══════════════════════════════════════════════════════════════════════
    EXAM EXPERIENCE V2 — PROGRESS + CURRENT QUESTION
@@ -1588,10 +1932,16 @@ function hideSaveBanner() {
    ══════════════════════════════════════════════════════════════════════ */
 async function runCode(question_id, mode, verdict, buttons, stateEl) {
   buttons.forEach((b) => (b.disabled = true));
+  clearEditorErrorLine(question_id);
+
   verdict.classList.remove("hidden");
-  verdict.textContent = mode === "run"
-    ? "Running the visible tests…"
-    : "Running every test on the server…";
+  verdict.innerHTML = `
+    <div class="code-running-state">
+      <span class="code-running-dot"></span>
+      ${mode === "run"
+        ? "Running visible tests…"
+        : "Running all tests on the server…"}
+    </div>`;
 
   const q = questions.find((item) => item.id === question_id);
   const prepared = normalizeEditorBeforeRun(
@@ -1613,29 +1963,57 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
   buttons.forEach((b) => (b.disabled = false));
 
   if (res.error) {
-    verdict.textContent = res.service_down
-      ? `${res.error}\n\nYour code is saved. Try again in a minute, or tell your invigilator.`
-      : `Could not run: ${res.error}`;
+    verdict.innerHTML = "";
+
+    const box = document.createElement("div");
+    box.className = `notice ${res.service_down ? "warn" : "error"}`;
+    box.textContent = res.service_down
+      ? `${res.error} Your code is saved. Try again in a minute, or tell your invigilator.`
+      : res.error;
+
+    verdict.appendChild(box);
     return;
   }
 
-  const visible = res.results.filter((r) => !r.hidden);
-  const hidden = res.results.filter((r) => r.hidden);
+  const visible = (res.results ?? []).filter((r) => !r.hidden);
+  const hidden = (res.results ?? []).filter((r) => r.hidden);
 
   verdict.innerHTML = "";
 
   const summary = document.createElement("div");
   summary.className = "test-summary";
-  summary.textContent = `${res.passed} of ${res.total} tests passed${res.all_passed ? " ✓" : ""}`;
+  summary.textContent =
+    `${res.passed} of ${res.total} tests passed${res.all_passed ? " ✓" : ""}`;
   verdict.appendChild(summary);
 
   if (res.source_normalized) {
     const fix = document.createElement("div");
-    fix.className = "notice ok";
-    fix.style.marginTop = ".55rem";
+    fix.className = "notice ok code-normalized-note";
     fix.textContent =
-      "Python indentation was aligned to the proper starting column before running.";
+      "Indentation was cleaned automatically before running: Python leading tabs were converted to spaces and accidental whole-program indentation was removed.";
     verdict.appendChild(fix);
+  }
+
+  const firstDiagnostic = visible
+    .map((r) =>
+      r.diagnostic ||
+      friendlyCodeDiagnostic(r.stderr, q?.language ?? "python")
+    )
+    .find(Boolean);
+
+  if (firstDiagnostic) {
+    renderFriendlyDiagnostic(
+      verdict,
+      firstDiagnostic,
+      "",
+    );
+
+    if (firstDiagnostic.line) {
+      highlightEditorErrorLine(
+        question_id,
+        firstDiagnostic.line,
+      );
+    }
   }
 
   if (visible.length) {
@@ -1663,14 +2041,24 @@ async function runCode(question_id, mode, verdict, buttons, stateEl) {
       pres[2].textContent = r.got || "(nothing)";
       card.appendChild(row);
 
-      if (r.stderr) {
-        const err = document.createElement("pre");
-        err.className = "test-error";
-        err.textContent = `Error: ${r.stderr}`;
-        card.appendChild(err);
+      if (!r.pass && r.stderr) {
+        const diagnostic =
+          r.diagnostic ||
+          friendlyCodeDiagnostic(
+            r.stderr,
+            q?.language ?? "python",
+          );
+
+        renderFriendlyDiagnostic(
+          card,
+          diagnostic,
+          r.stderr,
+        );
       }
+
       grid.appendChild(card);
     });
+
     verdict.appendChild(grid);
   }
 
@@ -1712,7 +2100,12 @@ async function flushCodingDrafts() {
       if (!cm) return { question_id: q.id, skipped: true };
 
       clearTimeout(saveTimers[q.id]);
-      const code = cm.getValue();
+
+      const prepared = normalizeEditorBeforeRun(
+        cm,
+        q.language ?? "python",
+      );
+      const code = prepared.code;
 
       // Save even an intentionally blank editor. Otherwise a student who
       // deletes previously-written code just before Final Submit could have
