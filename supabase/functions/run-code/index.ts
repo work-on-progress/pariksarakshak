@@ -273,6 +273,11 @@ Deno.serve(async (req) => {
         String(savedAnswer?.code_submitted ?? "");
     }
 
+    const codeBeforeNormalization = code;
+    code = normalizeSourceCode(code, language);
+    const sourceNormalized =
+      code !== codeBeforeNormalization;
+
     if (code.length > 50_000) {
       return json(
         { error: "That submission is too long." },
@@ -367,6 +372,7 @@ Deno.serve(async (req) => {
         all_passed: false,
         results: [],
         blank_code: true,
+        source_normalized: sourceNormalized,
       });
     }
 
@@ -484,6 +490,7 @@ Deno.serve(async (req) => {
       passed,
       total: tests.length,
       all_passed: passed === tests.length,
+      source_normalized: sourceNormalized,
       results,
     });
   } catch (e) {
@@ -716,6 +723,61 @@ function judge0Headers() {
   }
 
   return headers;
+}
+
+
+function normalizeSourceCode(
+  value: unknown,
+  language: string,
+) {
+  let text = String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\uFEFF/, "");
+
+  text = text
+    .replace(/^(?:[ \t]*\n)+/, "")
+    .replace(/(?:\n[ \t]*)+$/, "");
+
+  if (String(language || "").toLowerCase() !== "python") {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  const nonEmpty =
+    lines.filter((line) => line.trim().length > 0);
+
+  if (!nonEmpty.length) return text;
+
+  const prefixes = nonEmpty.map(
+    (line) => line.match(/^[ \t]*/)?.[0] ?? "",
+  );
+
+  let common = prefixes[0];
+
+  for (let i = 1; i < prefixes.length && common; i++) {
+    const next = prefixes[i];
+    let j = 0;
+
+    while (
+      j < common.length &&
+      j < next.length &&
+      common[j] === next[j]
+    ) {
+      j++;
+    }
+
+    common = common.slice(0, j);
+  }
+
+  if (!common) return text;
+
+  return lines
+    .map((line) =>
+      line.trim().length && line.startsWith(common)
+        ? line.slice(common.length)
+        : line
+    )
+    .join("\n");
 }
 
 function normalizeOutput(value: unknown) {
